@@ -466,31 +466,18 @@ export function CumplidoNegocioTable({ negocioId, negocioNombre }: CumplidoNegoc
             nota = (prevValor as any).nota
           }
 
-          if ((!value || value === 0) && (!nota || nota.length === 0)) {
-            const newCalificaciones = { ...calificaciones }
-            if (newCalificaciones[key]) {
-              const horasKeys = Object.keys(newCalificaciones[key])
-              horasKeys.forEach((horaKey) => {
-                delete newCalificaciones[key][horaKey]
-              })
-            }
-            newMap.set(idPuesto, {
-              ...existing,
-              calificaciones: newCalificaciones,
-            })
-          } else {
-            if (!calificaciones[key]) {
-              calificaciones[key] = {}
-            }
-            calificaciones[key][hora] = { valor: value, nota }
-
-            newMap.set(idPuesto, {
-              ...existing,
-              calificaciones: {
-                ...calificaciones,
-              },
-            })
+          // Siempre guardar el valor (incluyendo 0)
+          if (!calificaciones[key]) {
+            calificaciones[key] = {}
           }
+          calificaciones[key][hora] = { valor: value, nota }
+
+          newMap.set(idPuesto, {
+            ...existing,
+            calificaciones: {
+              ...calificaciones,
+            },
+          })
         } else {
           if (typeof value === "string") {
             newMap.set(idPuesto, { ...existing, [field]: value })
@@ -1299,14 +1286,16 @@ export function CumplidoNegocioTable({ negocioId, negocioNombre }: CumplidoNegoc
                                         min="0"
                                         max="10"
                                         placeholder="Calif."
-                                        value={valor === 0 && tieneNota ? "" : valor}
-                                        onChange={(e) =>
+                                        value={valor === 0 ? "" : (valor === null ? "" : valor)}
+                                        onChange={(e) => {
+                                          const inputValue = e.target.value;
+                                          const numericValue = inputValue === "" ? 0 : Number.parseInt(inputValue, 10);
                                           handleChange(
                                             puesto.id_puesto,
                                             `calificaciones.${col.key}`,
-                                            Number.parseInt(e.target.value || "0", 10) || 0,
-                                          )
-                                        }
+                                            numericValue,
+                                          );
+                                        }}
                                         onContextMenu={(e) => handleNotaContextMenu(e, puesto.id_puesto, col.key)}
                                       />
                                     ) : valor === 0 && tieneNota ? (

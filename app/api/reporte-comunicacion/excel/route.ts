@@ -7,13 +7,55 @@ function getFechaFormato(fecha: string | Date) {
   return `${d.getDate().toString().padStart(2, '0')}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getFullYear()}`;
 }
 
+// Función para determinar el turno según la hora (igual al frontend)
+function getTurnoByHora(hora: string) {
+  if (!hora) return "diurno"
+  const [hh, mm] = hora.split(":").map(Number)
+  const minutos = hh * 60 + mm
+  if (minutos >= 360 && minutos < 840) return "diurno" // 06:00 - 13:59
+  if (minutos >= 840 && minutos < 1320) return "b" // 14:00 - 21:59
+  // Nocturno: 22:00 - 23:59 (1320-1439) o 00:00 - 05:59 (0-359)
+  if (minutos >= 1320 || minutos < 360) return "nocturno"
+  return "diurno" // fallback
+}
+
+// Función para migrar calificaciones al nuevo formato { valor, nota } (igual al frontend)
+function migrarCalificaciones(calificaciones: any) {
+  if (!calificaciones || typeof calificaciones !== 'object') return {};
+  const resultado: any = {};
+  for (const key of Object.keys(calificaciones)) {
+    const horas = calificaciones[key];
+    if (typeof horas !== 'object' || Array.isArray(horas)) {
+      resultado[key] = horas;
+      continue;
+    }
+    resultado[key] = {};
+    for (const hora of Object.keys(horas)) {
+      const valor = horas[hora];
+      if (typeof valor === 'object' && valor !== null && 'valor' in valor) {
+        // Ya migrado
+        resultado[key][hora] = valor;
+      } else {
+        // Migrar
+        resultado[key][hora] = { valor, nota: null };
+      }
+    }
+  }
+  return resultado;
+}
+
 async function getConfiguracion(negocioId: string, fecha: string) {
+  try {
   const [rows] = await pool.query(
     'SELECT cantidad_diurno, cantidad_nocturno FROM configuracion_reportes_comunicacion WHERE id_negocio = ? AND fecha_inicial <= ? ORDER BY fecha_inicial DESC LIMIT 1',
     [negocioId, fecha]
   );
-  const config = Array.isArray(rows) && rows.length > 0 ? rows[0] : { cantidad_diurno: 0, cantidad_nocturno: 0 };
+    const config = Array.isArray(rows) && rows.length > 0 ? rows[0] : { cantidad_diurno: 1, cantidad_nocturno: 1 };
   return config as { cantidad_diurno: number; cantidad_nocturno: number };
+  } catch (error) {
+    console.error('Error al obtener configuración, usando valores por defecto:', error);
+    return { cantidad_diurno: 1, cantidad_nocturno: 1 };
+  }
 }
 
 export async function POST(request: Request) {
@@ -48,6 +90,7 @@ export async function POST(request: Request) {
     let hojasConDatos = 0;
 
     for (const fecha of [...fechas].reverse()) {
+      try {
       const { cantidad_diurno, cantidad_nocturno } = await getConfiguracion(negocioId, fecha);
 
       const [cumplidosRows] = await pool.query(
@@ -74,10 +117,13 @@ export async function POST(request: Request) {
         reportes = (reportesRows as any[]).map((r: any) => {
           let calificacionesProcesadas;
           try {
-            calificacionesProcesadas = typeof r.calificaciones === 'string'
+            calificacionesProcesadas = migrarCalificaciones(
+              typeof r.calificaciones === 'string'
               ? JSON.parse(r.calificaciones)
-              : (r.calificaciones || {});
+                : (r.calificaciones || {})
+            );
           } catch (e) {
+            console.error('Error al migrar calificaciones para id_cumplido', r.id_cumplido, e);
             calificacionesProcesadas = {};
           }
           return {
@@ -93,79 +139,125 @@ export async function POST(request: Request) {
         unidades[c.nombre_unidad].push(c);
       });
 
-      const getPorTurno = (turno: number) => {
-        const res: Record<string, any[]> = {};
-        for (const unidad in unidades) {
-          const filtrados = unidades[unidad].filter((c) => c.id_tipo_turno === turno);
-          if (filtrados.length) {
-            res[unidad] = filtrados;
+      // Estructurar datos por puesto: cumplidos[idPuesto] = { diurno, b, nocturno }
+      const cumplidosEstructurados: Record<number, { diurno?: any, b?: any, nocturno?: any }> = {};
+      
+      cumplidosArray.forEach((c: any) => {
+        if (!cumplidosEstructurados[c.id_puesto]) {
+          cumplidosEstructurados[c.id_puesto] = {};
+        }
+        
+        const turno = c.id_tipo_turno === 1 ? 'diurno' : c.id_tipo_turno === 2 ? 'nocturno' : 'b';
+        cumplidosEstructurados[c.id_puesto][turno] = {
+          id_cumplido: c.id_cumplido,
+          colaborador: c.nombre_colaborador || '',
+          calificaciones: {}
+        };
+      });
+
+      // Agregar calificaciones a cada turno
+      reportes.forEach((reporte: any) => {
+        const cumplido = cumplidosArray.find((c: any) => c.id_cumplido === reporte.id_cumplido);
+        if (cumplido && cumplidosEstructurados[cumplido.id_puesto]) {
+          const turno = cumplido.id_tipo_turno === 1 ? 'diurno' : cumplido.id_tipo_turno === 2 ? 'nocturno' : 'b';
+          if (cumplidosEstructurados[cumplido.id_puesto][turno]) {
+            cumplidosEstructurados[cumplido.id_puesto][turno].calificaciones = reporte.calificaciones || {};
           }
         }
-        return res;
-      };
-      const diuo = getPorTurno(1);
-      const nocturno = getPorTurno(2);
-      const turnoB = getPorTurno(3);
+      });
 
-      let clavesDiurno: string[] = [];
-      let clavesNocturno: string[] = [];
-      let horasDiurno: string[] = [];
-      let horasNocturno: string[] = [];
-      for (const r of reportes) {
-        const cal = r.calificaciones || {};
-        const tipoTurno = (cumplidosArray.find((c: any) => c.id_cumplido === r.id_cumplido) as { id_tipo_turno?: number } | undefined)?.id_tipo_turno;
-        for (const key of Object.keys(cal)) {
-          for (const hora of Object.keys(cal[key])) {
-            if (tipoTurno === 1 || tipoTurno === 3) { // Include Turno B in Diurno
-              if (!clavesDiurno.includes(key)) clavesDiurno.push(key);
-              if (!horasDiurno.includes(hora)) horasDiurno.push(hora);
-            } else if (tipoTurno === 2) {
-              if (!clavesNocturno.includes(key)) clavesNocturno.push(key);
-              if (!horasNocturno.includes(hora)) horasNocturno.push(hora);
+      // Generar claves basadas en la configuración
+      const clavesDiurno = Array.from({ length: cantidad_diurno }, (_, i) => `R${i + 1}:N`);
+      const clavesNocturno = Array.from({ length: cantidad_nocturno }, (_, i) => `R${i + 1}:N`);
+      
+      // Extraer horas reales de las calificaciones existentes (igual que el frontend)
+      const horasReales: { [key: string]: string } = {};
+      reportes.forEach((reporte: any) => {
+        if (reporte.calificaciones && typeof reporte.calificaciones === 'object') {
+          Object.entries(reporte.calificaciones).forEach(([rKey, horaObj]) => {
+            if (horaObj && typeof horaObj === 'object' && !Array.isArray(horaObj)) {
+              Object.keys(horaObj).forEach((hora) => {
+                if (!horasReales[rKey]) {
+                  horasReales[rKey] = hora;
+                }
+              });
             }
-          }
+          });
         }
-      }
-      clavesDiurno.sort();
-      clavesNocturno.sort();
-      horasDiurno.sort();
-      horasNocturno.sort();
+      });
 
-      clavesDiurno = Array.from({ length: cantidad_diurno }, (_, i) => `R${i + 1}`);
-      clavesNocturno = Array.from({ length: cantidad_nocturno }, (_, i) => `R${i + 1}`);
-      if (horasDiurno.length < cantidad_diurno) {
-        horasDiurno = [...horasDiurno, ...Array(cantidad_diurno - horasDiurno.length).fill('')];
-      }
-      if (horasNocturno.length < cantidad_nocturno) {
-        horasNocturno = [...horasNocturno, ...Array(cantidad_nocturno - horasNocturno.length).fill('')];
-      }
+      // Generar horas basadas en las horas reales de las calificaciones
+      const horasDiurno: string[] = [];
+      const horasNocturno: string[] = [];
+      
+      // Para cada clave de reporte, obtener su hora real
+      clavesDiurno.forEach((clave) => {
+        const hora = horasReales[clave] || '';
+        if (hora) {
+          horasDiurno.push(hora);
+        } else {
+          // Si no hay hora real, usar hora por defecto basada en la posición
+          const index = clavesDiurno.indexOf(clave);
+          const horaDefault = 6 + index;
+          horasDiurno.push(`${horaDefault.toString().padStart(2, '0')}:00`);
+        }
+      });
+      
+      clavesNocturno.forEach((clave) => {
+        const hora = horasReales[clave] || '';
+        if (hora) {
+          horasNocturno.push(hora);
+        } else {
+          // Si no hay hora real, usar hora por defecto basada en la posición
+          const index = clavesNocturno.indexOf(clave);
+          const horaDefault = 22 + index;
+          horasNocturno.push(`${(horaDefault % 24).toString().padStart(2, '0')}:00`);
+        }
+      });
 
       const sheet = workbook.addWorksheet(fecha);
       hojasConDatos++;
 
-      const totalCols = 5 + clavesDiurno.length + clavesNocturno.length;
+      const totalCols = 6 + clavesDiurno.length + clavesNocturno.length;
+      
+      // Título principal
       sheet.mergeCells(1, 1, 1, totalCols);
-      sheet.getCell(1, 1).value = `REPORTE DE COMUNICACION ${String(nombreNegocio).toUpperCase()}`;
-      sheet.getCell(1, 1).fill = {
+      const titleCell = sheet.getCell(1, 1);
+      titleCell.value = `REPORTE DE COMUNICACIÓN ${String(nombreNegocio).toUpperCase()}`;
+      titleCell.fill = {
         type: 'pattern',
         pattern: 'solid',
         fgColor: { argb: '002060' }
       };
-      sheet.getCell(1, 1).font = { color: { argb: 'FFFFFF' }, bold: true, size: 16 };
-      sheet.getCell(1, 1).alignment = { vertical: 'middle', horizontal: 'center' };
+      titleCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 16 };
+      titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+      titleCell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
 
+      // Fecha
       sheet.mergeCells(2, 1, 2, totalCols);
       const [yyyy, mm, dd] = fecha.split('-');
-      sheet.getCell(2, 1).value = `${dd}-${mm}-${yyyy}`;
-      sheet.getCell(2, 1).font = { bold: true, size: 13 };
-      sheet.getCell(2, 1).alignment = { vertical: 'middle', horizontal: 'center' };
-      sheet.getCell(2, 1).fill = {
+      const dateCell = sheet.getCell(2, 1);
+      dateCell.value = `${dd}-${mm}-${yyyy}`;
+      dateCell.fill = {
         type: 'pattern',
         pattern: 'solid',
         fgColor: { argb: '002060' }
       };
-      sheet.getCell(2, 1).font = { color: { argb: 'FFFFFF' }, bold: true, size: 13 };
+      dateCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 13 };
+      dateCell.alignment = { vertical: 'middle', horizontal: 'center' };
+      dateCell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+      };
 
+      // Encabezados principales
       const encabezadosPrincipales = [
         'UNIDAD DE NEGOCIO',
         'PUESTO',
@@ -174,245 +266,398 @@ export async function POST(request: Request) {
         'COLABORADOR NOCTURNO',
         'NIVEL DE COMUNICACIÓN'
       ];
+      
       for (let c = 1; c <= encabezadosPrincipales.length; c++) {
         sheet.mergeCells(3, c, 4, c);
-        sheet.getCell(3, c).value = encabezadosPrincipales[c - 1];
-        sheet.getCell(3, c).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        sheet.getCell(3, c).font = { color: { argb: 'FFFFFF' }, bold: true };
-        sheet.getCell(3, c).fill = {
+        const headerCell = sheet.getCell(3, c);
+        headerCell.value = encabezadosPrincipales[c - 1];
+        headerCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        headerCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 11 };
+        headerCell.fill = {
           type: 'pattern',
           pattern: 'solid',
           fgColor: { argb: '002060' }
         };
-        sheet.getCell(3, c).border = { bottom: { style: 'thin' }, right: { style: 'thin' }, left: { style: 'thin' }, top: { style: 'thin' } };
+        headerCell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
       }
 
+      // Encabezados de turnos y horas
       let col = encabezadosPrincipales.length + 1;
       const diurnoStartCol = col;
+      
+      // Horas del turno diurno
       for (let i = 0; i < clavesDiurno.length; i++) {
         const hora = horasDiurno[i] || '';
-        sheet.getCell(4, col++).value = hora ? hora : '';
+        const hourCell = sheet.getCell(4, col);
+        hourCell.value = hora;
+        hourCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        hourCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
+        hourCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: '002060' }
+        };
+        hourCell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+        col++;
       }
       const diurnoEndCol = col - 1;
+      
       const nocturnoStartCol = col;
+      // Horas del turno nocturno
       for (let i = 0; i < clavesNocturno.length; i++) {
         const hora = horasNocturno[i] || '';
-        sheet.getCell(4, col++).value = hora ? hora : '';
+        const hourCell = sheet.getCell(4, col);
+        hourCell.value = hora;
+        hourCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        hourCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
+        hourCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: '002060' }
+        };
+        hourCell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+        col++;
       }
       const nocturnoEndCol = col - 1;
 
+      // Títulos de turnos
       if (clavesDiurno.length > 0 && diurnoEndCol >= diurnoStartCol) {
         sheet.mergeCells(3, diurnoStartCol, 3, diurnoEndCol);
-        sheet.getCell(3, diurnoStartCol).value = 'Turno Diurno';
-        sheet.getCell(3, diurnoStartCol).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        const turnoDiurnoCell = sheet.getCell(3, diurnoStartCol);
+        turnoDiurnoCell.value = 'TURNO DIURNO';
+        turnoDiurnoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        turnoDiurnoCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 11 };
+        turnoDiurnoCell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: '002060' }
+        };
+        turnoDiurnoCell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
       }
+      
       if (clavesNocturno.length > 0 && nocturnoEndCol >= nocturnoStartCol) {
         sheet.mergeCells(3, nocturnoStartCol, 3, nocturnoEndCol);
-        sheet.getCell(3, nocturnoStartCol).value = 'Turno Nocturno';
-        sheet.getCell(3, nocturnoStartCol).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-      }
-
-      for (let c = 6; c <= totalCols; c++) {
-        sheet.getCell(4, c).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        sheet.getCell(4, c).font = { color: { argb: 'FFFFFF' }, bold: true };
-        sheet.getCell(4, c).fill = {
+        const turnoNocturnoCell = sheet.getCell(3, nocturnoStartCol);
+        turnoNocturnoCell.value = 'TURNO NOCTURNO';
+        turnoNocturnoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        turnoNocturnoCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 11 };
+        turnoNocturnoCell.fill = {
           type: 'pattern',
           pattern: 'solid',
           fgColor: { argb: '002060' }
         };
-        sheet.getCell(4, c).border = { bottom: { style: 'thin' }, right: { style: 'thin' }, left: { style: 'thin' }, top: { style: 'thin' } };
-      }
-      for (let c = 6; c <= totalCols; c++) {
-        sheet.getCell(3, c).border = { bottom: { style: 'thin' }, right: { style: 'thin' }, left: { style: 'thin' }, top: { style: 'thin' } };
-        sheet.getCell(3, c).fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: '002060' }
+        turnoNocturnoCell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
         };
-        sheet.getCell(3, c).font = { color: { argb: 'FFFFFF' }, bold: true };
       }
 
       let row = 5;
       for (const unidad of Object.keys(unidades)) {
-        const puestosDiurno = diuo[unidad] || [];
-        const puestosNocturno = nocturno[unidad] || [];
-        const puestosTurnoB = turnoB[unidad] || [];
-        const puestosUnidad = [
-          ...new Set([
-            ...puestosDiurno.map(p => p.id_puesto),
-            ...puestosTurnoB.map(p => p.id_puesto),
-            ...puestosNocturno.map(p => p.id_puesto)
-          ])
-        ];
+        const puestosUnidad = unidades[unidad];
+        
+        // Agrupar puestos únicos (sin duplicados por turno)
+        const puestosUnicos = puestosUnidad.reduce((acc: any[], puesto: any) => {
+          if (!acc.find(p => p.id_puesto === puesto.id_puesto)) {
+            acc.push(puesto);
+          }
+          return acc;
+        }, []);
+        
         const startRow = row;
-        for (const idPuesto of puestosUnidad) {
+        for (const puesto of puestosUnicos) {
+          const idPuesto = puesto.id_puesto;
+          const cumplido = cumplidosEstructurados[idPuesto] || {};
+          const diurnoData = cumplido.diurno || { colaborador: '', calificaciones: {} };
+          const turnoBData = cumplido.b || { colaborador: '', calificaciones: {} };
+          const nocturnoData = cumplido.nocturno || { colaborador: '', calificaciones: {} };
+          
           let col = 1;
-          if (idPuesto === puestosUnidad[0]) {
-            sheet.getCell(row, col).value = unidad;
+          
+          // Unidad de negocio
+          if (idPuesto === puestosUnicos[0].id_puesto) {
+            const unidadCell = sheet.getCell(row, col);
+            unidadCell.value = unidad;
+            unidadCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            unidadCell.font = { bold: true, size: 10 };
           }
           col++;
-          const diurnoData = puestosDiurno.find(p => p.id_puesto === idPuesto) || { nombre_puesto: '', nombre_colaborador: '', id_cumplido: null };
-          const turnoBData = puestosTurnoB.find(p => p.id_puesto === idPuesto) || { nombre_puesto: '', nombre_colaborador: '', id_cumplido: null };
-          const nocturnoData = puestosNocturno.find(p => p.id_puesto === idPuesto) || { nombre_puesto: '', nombre_colaborador: '', id_cumplido: null };
-          const nombreColaboradorDiurno = diurnoData.nombre_colaborador || '';
-          const nombreColaboradorB = turnoBData.nombre_colaborador || '';
-          const nombreColaboradorNocturno = nocturnoData.nombre_colaborador || '';
-          sheet.getCell(row, col++).value = diurnoData.nombre_puesto || turnoBData.nombre_puesto || nocturnoData.nombre_puesto || '';
-          sheet.getCell(row, col++).value = nombreColaboradorDiurno.trim();
-          sheet.getCell(row, col++).value = nombreColaboradorB.trim();
-          sheet.getCell(row, col++).value = nombreColaboradorNocturno.trim();
+          
+          // Puesto
+          const puestoCell = sheet.getCell(row, col);
+          puestoCell.value = puesto.nombre_puesto;
+          puestoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          puestoCell.font = { bold: true, size: 10 };
+          col++;
+          
+          // Colaborador diurno
+          const diurnoCell = sheet.getCell(row, col);
+          diurnoCell.value = diurnoData.colaborador.trim();
+          diurnoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          diurnoCell.font = { size: 10 };
+          col++;
+          
+          // Colaborador turno B
+          const turnoBCell = sheet.getCell(row, col);
+          turnoBCell.value = turnoBData.colaborador.trim();
+          turnoBCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          turnoBCell.font = { size: 10 };
+          col++;
+          
+          // Colaborador nocturno
+          const nocturnoCell = sheet.getCell(row, col);
+          nocturnoCell.value = nocturnoData.colaborador.trim();
+          nocturnoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          nocturnoCell.font = { size: 10 };
+          col++;
 
-          let puntajes = [];
-          if (diurnoData.id_cumplido) {
-            const reporte = reportes.find((r) => r.id_cumplido === diurnoData.id_cumplido);
-            if (reporte && reporte.calificaciones) {
-              for (const key of Object.keys(reporte.calificaciones)) {
-                for (const hora of Object.keys(reporte.calificaciones[key])) {
-                  const val = reporte.calificaciones[key][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    if (typeof val.valor === 'number') puntajes.push(val.valor);
-                  } else if (typeof val === 'number') {
-                    puntajes.push(val);
+          // Calcular nivel de comunicación sumando todos los puntajes de los 3 turnos
+          let puntajes: number[] = [];
+          
+          // Sumar puntajes de diurno
+          if (diurnoData.calificaciones) {
+            Object.values(diurnoData.calificaciones).forEach((reporte: any) => {
+              if (typeof reporte === 'object' && reporte !== null) {
+                Object.values(reporte).forEach((val: any) => {
+                  if (val && typeof val === 'object' && 'valor' in val && typeof val.valor === 'number') {
+                    puntajes.push(val.valor);
                   }
-                }
+                });
               }
-            }
+            });
           }
-          if (turnoBData.id_cumplido) {
-            const reporte = reportes.find((r) => r.id_cumplido === turnoBData.id_cumplido);
-            if (reporte && reporte.calificaciones) {
-              for (const key of Object.keys(reporte.calificaciones)) {
-                for (const hora of Object.keys(reporte.calificaciones[key])) {
-                  const val = reporte.calificaciones[key][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    if (typeof val.valor === 'number') puntajes.push(val.valor);
-                  } else if (typeof val === 'number') {
-                    puntajes.push(val);
+          
+          // Sumar puntajes de turno B
+          if (turnoBData.calificaciones) {
+            Object.values(turnoBData.calificaciones).forEach((reporte: any) => {
+              if (typeof reporte === 'object' && reporte !== null) {
+                Object.values(reporte).forEach((val: any) => {
+                  if (val && typeof val === 'object' && 'valor' in val && typeof val.valor === 'number') {
+                    puntajes.push(val.valor);
                   }
-                }
+                });
               }
-            }
+            });
           }
-          if (nocturnoData.id_cumplido) {
-            const reporte = reportes.find((r) => r.id_cumplido === nocturnoData.id_cumplido);
-            if (reporte && reporte.calificaciones) {
-              for (const key of Object.keys(reporte.calificaciones)) {
-                for (const hora of Object.keys(reporte.calificaciones[key])) {
-                  const val = reporte.calificaciones[key][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    if (typeof val.valor === 'number') puntajes.push(val.valor);
-                  } else if (typeof val === 'number') {
-                    puntajes.push(val);
+          
+          // Sumar puntajes de nocturno
+          if (nocturnoData.calificaciones) {
+            Object.values(nocturnoData.calificaciones).forEach((reporte: any) => {
+              if (typeof reporte === 'object' && reporte !== null) {
+                Object.values(reporte).forEach((val: any) => {
+                  if (val && typeof val === 'object' && 'valor' in val && typeof val.valor === 'number') {
+                    puntajes.push(val.valor);
                   }
-                }
+                });
               }
-            }
+            });
           }
+          
           const nivelCom = puntajes.length > 0 ? `${Math.round((puntajes.reduce((a, b) => a + b, 0) / puntajes.length) * 10)}%` : '';
-          sheet.getCell(row, col++).value = nivelCom;
+          const nivelComCell = sheet.getCell(row, col);
+          nivelComCell.value = nivelCom;
+          nivelComCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+          nivelComCell.font = { bold: true, size: 10, color: { argb: '000000' } };
+          if (nivelCom) {
+            const porcentaje = parseInt(nivelCom.replace('%', ''));
+            if (porcentaje >= 80) {
+              nivelComCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } }; // Verde claro
+            } else if (porcentaje >= 60) {
+              nivelComCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } }; // Amarillo claro
+            } else {
+              nivelComCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } }; // Rojo claro
+            }
+          }
+          col++;
 
-          for (const k of clavesDiurno) {
+          // Procesar columnas diurnas (incluye Turno B)
+          for (let i = 0; i < clavesDiurno.length; i++) {
+            const k = clavesDiurno[i];
+            const hora = horasDiurno[i];
             let valor = '';
             let nota = '';
-            if (diurnoData.id_cumplido) {
-              const reporte = reportes.find((r) => r.id_cumplido === diurnoData.id_cumplido);
-              if (reporte && reporte.calificaciones && reporte.calificaciones[k]) {
-                const horas = Object.keys(reporte.calificaciones[k]);
-                if (horas.length > 0) {
-                  const hora = horas[0];
-                  const val = reporte.calificaciones[k][hora];
+            
+            // Buscar en diurno primero
+            if (diurnoData.calificaciones && diurnoData.calificaciones[k] && diurnoData.calificaciones[k][hora]) {
+              const val = diurnoData.calificaciones[k][hora];
                   if (val && typeof val === 'object' && 'valor' in val) {
                     valor = val.valor;
-                    nota = val.nota;
+                nota = val.nota || '';
                   } else {
                     valor = val;
-                  }
-                }
               }
             }
-            if (!valor && turnoBData.id_cumplido) { // Include Turno B ratings in Diurno columns
-              const reporte = reportes.find((r) => r.id_cumplido === turnoBData.id_cumplido);
-              if (reporte && reporte.calificaciones && reporte.calificaciones[k]) {
-                const horas = Object.keys(reporte.calificaciones[k]);
-                if (horas.length > 0) {
-                  const hora = horas[0];
-                  const val = reporte.calificaciones[k][hora];
+            
+            // Si no hay en diurno, buscar en Turno B
+            if (valor === '' && turnoBData.calificaciones && turnoBData.calificaciones[k] && turnoBData.calificaciones[k][hora]) {
+              const val = turnoBData.calificaciones[k][hora];
                   if (val && typeof val === 'object' && 'valor' in val) {
                     valor = val.valor;
-                    nota = val.nota;
+                nota = val.nota || '';
                   } else {
                     valor = val;
-                  }
-                }
               }
             }
-            const cell = sheet.getCell(row, col++);
+            
+            const cell = sheet.getCell(row, col);
             cell.value = valor;
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            cell.font = { size: 10 };
+            cell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+            
             if (nota && nota.length > 0) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCCC' } };
               cell.note = nota;
-            }
-            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-            cell.border = { bottom: { style: 'thin' }, right: { style: 'thin' }, left: { style: 'thin' }, top: { style: 'thin' } };
-          }
-
-          for (const k of clavesNocturno) {
-            let valor = '';
-            let nota = '';
-            if (nocturnoData.id_cumplido) {
-              const reporte = reportes.find((r) => r.id_cumplido === nocturnoData.id_cumplido);
-              if (reporte && reporte.calificaciones && reporte.calificaciones[k]) {
-                const horas = Object.keys(reporte.calificaciones[k]);
-                if (horas.length > 0) {
-                  const hora = horas[0];
-                  const val = reporte.calificaciones[k][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    valor = val.valor;
-                    nota = val.nota;
-                  } else {
-                    valor = val;
-                  }
+            } else if (valor !== '' && valor !== null && valor !== undefined) {
+              // Color según el valor de la calificación
+              const numValor = parseFloat(valor);
+              if (!isNaN(numValor)) {
+                if (numValor >= 4) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } }; // Verde claro
+                } else if (numValor >= 3) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } }; // Amarillo claro
+                } else if (numValor > 0) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } }; // Rojo claro
                 }
+                // Si numValor es 0, no aplicar color (celda blanca)
               }
             }
-            const cell = sheet.getCell(row, col++);
+            col++;
+          }
+
+          // Procesar columnas nocturnas
+          for (let i = 0; i < clavesNocturno.length; i++) {
+            const k = clavesNocturno[i];
+            const hora = horasNocturno[i];
+            let valor = '';
+            let nota = '';
+            
+            // Buscar en nocturno
+            if (nocturnoData.calificaciones && nocturnoData.calificaciones[k] && nocturnoData.calificaciones[k][hora]) {
+              const val = nocturnoData.calificaciones[k][hora];
+                  if (val && typeof val === 'object' && 'valor' in val) {
+                    valor = val.valor;
+                nota = val.nota || '';
+                  } else {
+                    valor = val;
+              }
+            }
+            
+            const cell = sheet.getCell(row, col);
             cell.value = valor;
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            cell.font = { size: 10 };
+            cell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+            
             if (nota && nota.length > 0) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCCC' } };
               cell.note = nota;
+            } else if (valor !== '' && valor !== null && valor !== undefined) {
+              // Color según el valor de la calificación
+              const numValor = parseFloat(valor);
+              if (!isNaN(numValor)) {
+                if (numValor >= 4) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } }; // Verde claro
+                } else if (numValor >= 3) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } }; // Amarillo claro
+                } else if (numValor > 0) {
+                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } }; // Rojo claro
+                }
+                // Si numValor es 0, no aplicar color (celda blanca)
+              }
             }
-            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-            cell.border = { bottom: { style: 'thin' }, right: { style: 'thin' }, left: { style: 'thin' }, top: { style: 'thin' } };
+            col++;
           }
 
-          const fillColor = row % 2 === 0 ? 'FFFFFF' : 'F2F2F2';
+          // Aplicar estilo de fila alternada solo a celdas que no tienen color especial
+          const fillColor = row % 2 === 0 ? 'FFFFFF' : 'F8F9FA';
           for (let cIdx = 1; cIdx <= totalCols; cIdx++) {
             const cell = sheet.getCell(row, cIdx);
-            if (!cell.fill || (cell.fill as any).fgColor?.argb !== 'FFCCCC') {
+            // Solo aplicar color de fondo si la celda no tiene un color especial
+            if (!cell.fill || 
+                (cell.fill as any).fgColor?.argb === 'FFFFFF' || 
+                (cell.fill as any).fgColor?.argb === 'F2F2F2' ||
+                (cell.fill as any).fgColor?.argb === 'F8F9FA') {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
             }
-            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-            cell.border = { bottom: { style: 'thin' }, right: { style: 'thin' }, left: { style: 'thin' }, top: { style: 'thin' } };
+            // Asegurar que todas las celdas tengan bordes
+            if (!cell.border || Object.keys(cell.border).length === 0) {
+              cell.border = {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                bottom: { style: 'thin' },
+                right: { style: 'thin' }
+              };
+            }
           }
           row++;
         }
 
-        if (puestosUnidad.length > 1) {
+        if (puestosUnicos.length > 1) {
           sheet.mergeCells(startRow, 1, row - 1, 1);
           sheet.getCell(startRow, 1).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
         }
       }
 
+      // Configurar anchos de columna optimizados
       sheet.columns = [
-        { width: 25 },
-        { width: 20 },
-        { width: 25 },
-        { width: 25 },
-        { width: 25 },
-        { width: 18 },
-        ...clavesDiurno.map(() => ({ width: 13 })),
-        ...clavesNocturno.map(() => ({ width: 13 })),
+        { width: 30 }, // Unidad de negocio
+        { width: 25 }, // Puesto
+        { width: 30 }, // Colaborador diurno
+        { width: 30 }, // Colaborador turno B
+        { width: 30 }, // Colaborador nocturno
+        { width: 20 }, // Nivel de comunicación
+        ...clavesDiurno.map(() => ({ width: 15 })), // Columnas diurnas
+        ...clavesNocturno.map(() => ({ width: 15 })), // Columnas nocturnas
       ];
+      
+      // Configurar altura de filas
+      sheet.getRow(1).height = 30; // Título
+      sheet.getRow(2).height = 25; // Fecha
+      sheet.getRow(3).height = 20; // Encabezados principales
+      sheet.getRow(4).height = 20; // Encabezados de horas
+      
+      // Aplicar altura a todas las filas de datos
+      for (let r = 5; r <= row; r++) {
+        sheet.getRow(r).height = 18;
+      }
+      } catch (error) {
+        console.error(`Error procesando fecha ${fecha}:`, error);
+        diasSinDatos.push(fecha);
+        continue;
+      }
     }
 
     if (hojasConDatos === 0) {
