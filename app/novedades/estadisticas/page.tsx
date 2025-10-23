@@ -116,10 +116,11 @@ export default function EstadisticasPage() {
   const [tipoGraficoSedes, setTipoGraficoSedes] = useState<'comparativa' | 'tendencia'>('tendencia');
   const scrollTabsRef = useRef<HTMLDivElement>(null);
 
-  // Estados para los años a comparar
+  // Estados para los años a comparar (dinámicos)
   const currentYear = new Date().getFullYear()
-  const [año1, setAño1] = useState<number>(currentYear)
-  const [año2, setAño2] = useState<number>(currentYear - 1)
+  const [añosDisponibles, setAñosDisponibles] = useState<number[]>([currentYear - 1, currentYear])
+  const [año1, setAño1] = useState<number>(currentYear - 1) // Año anterior
+  const [año2, setAño2] = useState<number>(currentYear) // Año actual
 
   // 1. Agrega nuevos estados:
   const [unidades, setUnidades] = useState<{ id_unidad_negocio: number, nombre_unidad_negocio: string }[]>([]);
@@ -131,11 +132,6 @@ export default function EstadisticasPage() {
   const [porTipo, setPorTipo] = useState<any[]>([]);
   const [totales, setTotales] = useState<any[]>([]);
 
-  // Obtener años únicos de los eventos
-  const añosDisponibles = Array.from(new Set(eventos.map(e => {
-    if (!e.fecha_novedad) return undefined;
-    return Number(e.fecha_novedad.split('T')[0].split('-')[0])
-  }).filter((a): a is number => typeof a === 'number'))).sort((a, b) => b - a)
 
   // Datos para los gráficos generales
   const resumenPorNegocio: { [negocio: string]: { año1: number, año2: number } } = {}
@@ -355,8 +351,11 @@ export default function EstadisticasPage() {
     if (!negocioSeleccionado) return;
     setLoading(true);
     try {
-      // Cargar datos de reportes-puesto
-      const res = await fetch(`/api/novedades/reportes-puesto?id_negocio=${negocioSeleccionado.id}`);
+      // Crear parámetro de años dinámico
+      const añosParam = `${año1},${año2}`;
+      
+      // Cargar datos de reportes-puesto con años dinámicos
+      const res = await fetch(`/api/novedades/reportes-puesto?id_negocio=${negocioSeleccionado.id}&años=${añosParam}`);
       if (!res.ok) throw new Error('Error al cargar reportes por puesto');
       const data = await res.json();
       setPorPuesto(data.porPuesto || []);
@@ -365,11 +364,25 @@ export default function EstadisticasPage() {
       setTotales(data.totales || []);
       setResumenSedes(data.porPuesto || []);
       
+      // Actualizar años disponibles si vienen del backend
+      if (data.añosDisponibles && data.añosDisponibles.length > 0) {
+        setAñosDisponibles(data.añosDisponibles);
+        // Si los años actuales no están en los disponibles, ajustarlos
+        if (!data.añosDisponibles.includes(año1) || !data.añosDisponibles.includes(año2)) {
+          const añosOrdenados = data.añosDisponibles.sort((a: number, b: number) => b - a);
+          if (añosOrdenados.length >= 2) {
+            setAño1(añosOrdenados[0]); // Año más reciente
+            setAño2(añosOrdenados[1]); // Segundo año más reciente
+          }
+        }
+      }
+      
       // Debug: Imprimir información de puestos
       console.log('=== DEBUG FRONTEND ===');
+      console.log('Años utilizados:', data.años);
+      console.log('Años disponibles en BD:', data.añosDisponibles);
       console.log('Total de registros porPuesto:', (data.porPuesto || []).length);
       console.log('Puestos únicos:', Array.from(new Set((data.porPuesto || []).map((p: any) => p.puesto))));
-      console.log('Estructura debug del backend:', data.estructuraDebug);
       console.log('=== FIN DEBUG FRONTEND ===');
 
       // Asumiendo que el endpoint devuelve los eventos detallados en data.eventos
@@ -558,6 +571,13 @@ export default function EstadisticasPage() {
       cargarEventos();
     }
   }, [negocioSeleccionado]);
+
+  // Recargar datos cuando cambien los años seleccionados
+  useEffect(() => {
+    if (negocioSeleccionado && (año1 !== año2)) {
+      cargarEventos();
+    }
+  }, [año1, año2]);
 
   // --- DATOS PARA TABLAS Y GRÁFICOS ---
   // Para la tabla de comparativa de eventos por mes
@@ -842,21 +862,48 @@ export default function EstadisticasPage() {
             <Card className="p-4 lg:p-6 mt-4 h-[calc(100%-6rem)]">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-xl font-bold">Comparativa Eventos</h3>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setTipoGraficoComparativa('tendencia')}
-                    className={`p-2 rounded-lg ${tipoGraficoComparativa === 'tendencia' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
-                    title="Análisis de Tendencia"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 17l6-6 4 4 8-8" /></svg>
-                  </button>
-                  <button
-                    onClick={() => setTipoGraficoComparativa('comparativa')}
-                    className={`p-2 rounded-lg ${tipoGraficoComparativa === 'comparativa' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
-                    title="Vista Comparativa"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="8" /><rect x="9" y="8" width="4" height="12" /><rect x="15" y="4" width="4" height="16" /></svg>
-                  </button>
+                <div className="flex gap-4 items-center">
+                  {/* Selectores de año */}
+                  <div className="flex gap-2 items-center">
+                    <label className="text-sm font-medium">Año 1:</label>
+                    <select
+                      value={año1}
+                      onChange={(e) => setAño1(Number(e.target.value))}
+                      className="border rounded px-2 py-1 text-sm"
+                    >
+                      {añosDisponibles.map(año => (
+                        <option key={año} value={año}>{año}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <label className="text-sm font-medium">Año 2:</label>
+                    <select
+                      value={año2}
+                      onChange={(e) => setAño2(Number(e.target.value))}
+                      className="border rounded px-2 py-1 text-sm"
+                    >
+                      {añosDisponibles.map(año => (
+                        <option key={año} value={año}>{año}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setTipoGraficoComparativa('tendencia')}
+                      className={`p-2 rounded-lg ${tipoGraficoComparativa === 'tendencia' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
+                      title="Análisis de Tendencia"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 17l6-6 4 4 8-8" /></svg>
+                    </button>
+                    <button
+                      onClick={() => setTipoGraficoComparativa('comparativa')}
+                      className={`p-2 rounded-lg ${tipoGraficoComparativa === 'comparativa' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
+                      title="Vista Comparativa"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="8" /><rect x="9" y="8" width="4" height="12" /><rect x="15" y="4" width="4" height="16" /></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="flex flex-col lg:grid lg:grid-cols-4 gap-8 lg:gap-4 h-[calc(100%-3rem)] overflow-y-auto">
@@ -876,8 +923,8 @@ export default function EstadisticasPage() {
                       <thead className="sticky top-0">
                         <tr>
                           <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-16">Mes</th>
-                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">2024</th>
-                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">2025</th>
+                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">{año1}</th>
+                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">{año2}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -885,27 +932,27 @@ export default function EstadisticasPage() {
                           <tr key={mes}>
                             <td className="border border-black p-1 text-center text-xs">{mes}</td>
                             <td
-                              className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${mesSeleccionado?.mes === mes && mesSeleccionado?.año === 2024 ? 'bg-blue-100' : ''}`}
-                              onClick={() => mostrarDetallesEventos(mes, 2024)}
+                              className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${mesSeleccionado?.mes === mes && mesSeleccionado?.año === año1 ? 'bg-blue-100' : ''}`}
+                              onClick={() => mostrarDetallesEventos(mes, año1)}
                             >
-                              {porMes.find(m => m.anio === 2024 && m.mes === index + 1)?.cantidad || 0}
+                              {porMes.find(m => m.anio === año1 && m.mes === index + 1)?.cantidad || 0}
                             </td>
                             <td
-                              className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${mesSeleccionado?.mes === mes && mesSeleccionado?.año === 2025 ? 'bg-blue-100' : ''}`}
-                              onClick={() => mostrarDetallesEventos(mes, 2025)}
+                              className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${mesSeleccionado?.mes === mes && mesSeleccionado?.año === año2 ? 'bg-blue-100' : ''}`}
+                              onClick={() => mostrarDetallesEventos(mes, año2)}
                             >
-                              {porMes.find(m => m.anio === 2025 && m.mes === index + 1)?.cantidad || 0}
+                              {porMes.find(m => m.anio === año2 && m.mes === index + 1)?.cantidad || 0}
                             </td>
                           </tr>
                         ))}
                         <tr>
                           <td className="border border-black p-1 text-center font-bold text-xs">Total</td>
                           <td className="border border-black p-1 text-center font-bold text-xs">
-                            {porMes.filter(m => m.anio === 2024).reduce((sum, m) => sum + m.cantidad, 0)}
+                            {porMes.filter(m => m.anio === año1).reduce((sum, m) => sum + m.cantidad, 0)}
                           </td>
 
                           <td className="border border-black p-1 text-center font-bold text-xs">
-                            {porMes.filter(m => m.anio === 2025).reduce((sum, m) => sum + m.cantidad, 0)}
+                            {porMes.filter(m => m.anio === año2).reduce((sum, m) => sum + m.cantidad, 0)}
                           </td>
                         </tr>
                       </tbody>
@@ -924,16 +971,16 @@ export default function EstadisticasPage() {
                         labels: meses,
                         datasets: [
                           {
-                            label: 'Eventos 2024',
-                            data: porMes.filter(m => m.anio === 2024).map(m => m.cantidad),
+                            label: `Eventos ${año1}`,
+                            data: porMes.filter(m => m.anio === año1).map(m => m.cantidad),
                             borderColor: 'darkblue',
                             backgroundColor: 'darkblue',
                             tension: 0.1,
                             fill: false
                           },
                           {
-                            label: 'Eventos 2025',
-                            data: porMes.filter(m => m.anio === 2025).map(m => m.cantidad),
+                            label: `Eventos ${año2}`,
+                            data: porMes.filter(m => m.anio === año2).map(m => m.cantidad),
                             borderColor: 'lightgreen',
                             backgroundColor: 'lightgreen',
                             tension: 0.1,
@@ -985,21 +1032,48 @@ export default function EstadisticasPage() {
             <Card className="p-4 lg:p-6 mt-4 h-[calc(100%-6rem)]">
               <div className="flex justify-between items-center mb-3">
                 <h3 className="text-xl font-bold">Eventos por Puestos</h3>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setTipoGraficoSedes('tendencia')}
-                    className={`p-2 rounded-lg ${tipoGraficoSedes === 'tendencia' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
-                    title="Análisis de Tendencia"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 17l6-6 4 4 8-8" /></svg>
-                  </button>
-                  <button
-                    onClick={() => setTipoGraficoSedes('comparativa')}
-                    className={`p-2 rounded-lg ${tipoGraficoSedes === 'comparativa' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
-                    title="Vista Comparativa"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="8" /><rect x="9" y="8" width="4" height="12" /><rect x="15" y="4" width="4" height="16" /></svg>
-                  </button>
+                <div className="flex gap-4 items-center">
+                  {/* Selectores de año */}
+                  <div className="flex gap-2 items-center">
+                    <label className="text-sm font-medium">Año 1:</label>
+                    <select
+                      value={año1}
+                      onChange={(e) => setAño1(Number(e.target.value))}
+                      className="border rounded px-2 py-1 text-sm"
+                    >
+                      {añosDisponibles.map(año => (
+                        <option key={año} value={año}>{año}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <label className="text-sm font-medium">Año 2:</label>
+                    <select
+                      value={año2}
+                      onChange={(e) => setAño2(Number(e.target.value))}
+                      className="border rounded px-2 py-1 text-sm"
+                    >
+                      {añosDisponibles.map(año => (
+                        <option key={año} value={año}>{año}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setTipoGraficoSedes('tendencia')}
+                      className={`p-2 rounded-lg ${tipoGraficoSedes === 'tendencia' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
+                      title="Análisis de Tendencia"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 17l6-6 4 4 8-8" /></svg>
+                    </button>
+                    <button
+                      onClick={() => setTipoGraficoSedes('comparativa')}
+                      className={`p-2 rounded-lg ${tipoGraficoSedes === 'comparativa' ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'}`}
+                      title="Vista Comparativa"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="12" width="4" height="8" /><rect x="9" y="8" width="4" height="12" /><rect x="15" y="4" width="4" height="16" /></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="flex flex-col lg:grid lg:grid-cols-4 gap-8 lg:gap-4 h-[calc(100%-3rem)] overflow-y-auto">
@@ -1019,8 +1093,8 @@ export default function EstadisticasPage() {
                       <thead className="sticky top-0">
                         <tr>
                           <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs">Puesto</th>
-                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">2024</th>
-                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">2025</th>
+                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">{año1}</th>
+                          <th className="bg-[rgb(28,28,28)] text-white p-1 border border-black text-xs w-14">{año2}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1030,22 +1104,22 @@ export default function EstadisticasPage() {
                           
                           return puestosUnicos.map((nombrePuesto) => {
                             // Buscar los totales por puesto y año en porPuesto
-                            const total2024 = porPuesto.find((r: any) => r.puesto === nombrePuesto && r.anio === 2024)?.cantidad || 0
-                            const total2025 = porPuesto.find((r: any) => r.puesto === nombrePuesto && r.anio === 2025)?.cantidad || 0
+                            const totalAño1 = porPuesto.find((r: any) => r.puesto === nombrePuesto && r.anio === año1)?.cantidad || 0
+                            const totalAño2 = porPuesto.find((r: any) => r.puesto === nombrePuesto && r.anio === año2)?.cantidad || 0
                           return (
                               <tr key={nombrePuesto}>
                                 <td className="border border-black p-1 text-xs">{nombrePuesto}</td>
                               <td
-                                  className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${puestoSeleccionado?.puesto === nombrePuesto && puestoSeleccionado?.año === 2024 ? 'bg-blue-100' : ''}`}
-                                  onClick={() => { mostrarEventosPorPuesto(nombrePuesto, 2024); setShowModal(true); }}
+                                  className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${puestoSeleccionado?.puesto === nombrePuesto && puestoSeleccionado?.año === año1 ? 'bg-blue-100' : ''}`}
+                                  onClick={() => { mostrarEventosPorPuesto(nombrePuesto, año1); setShowModal(true); }}
                               >
-                                {total2024}
+                                {totalAño1}
                               </td>
                               <td
-                                  className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${puestoSeleccionado?.puesto === nombrePuesto && puestoSeleccionado?.año === 2025 ? 'bg-blue-100' : ''}`}
-                                  onClick={() => { mostrarEventosPorPuesto(nombrePuesto, 2025); setShowModal(true); }}
+                                  className={`border border-black p-1 text-center cursor-pointer hover:bg-gray-100 text-xs ${puestoSeleccionado?.puesto === nombrePuesto && puestoSeleccionado?.año === año2 ? 'bg-blue-100' : ''}`}
+                                  onClick={() => { mostrarEventosPorPuesto(nombrePuesto, año2); setShowModal(true); }}
                               >
-                                {total2025}
+                                {totalAño2}
                               </td>
                             </tr>
                           )
@@ -1054,10 +1128,10 @@ export default function EstadisticasPage() {
                         <tr>
                           <td className="border border-black p-1 text-center font-bold text-xs">Total</td>
                           <td className="border border-black p-1 text-center font-bold text-xs">
-                            {porPuesto.filter(r => r.anio === 2024).reduce((sum, r) => sum + r.cantidad, 0)}
+                            {porPuesto.filter(r => r.anio === año1).reduce((sum, r) => sum + r.cantidad, 0)}
                           </td>
                           <td className="border border-black p-1 text-center font-bold text-xs">
-                            {porPuesto.filter(r => r.anio === 2025).reduce((sum, r) => sum + r.cantidad, 0)}
+                            {porPuesto.filter(r => r.anio === año2).reduce((sum, r) => sum + r.cantidad, 0)}
                           </td>
                         </tr>
                       </tbody>
@@ -1077,16 +1151,16 @@ export default function EstadisticasPage() {
                             labels: puestosLabelsFinal,
                             datasets: [
                               {
-                                label: 'Eventos 2024',
-                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === 2024)?.cantidad || 0),
+                                label: `Eventos ${año1}`,
+                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === año1)?.cantidad || 0),
                                 borderColor: 'darkblue',
                                 backgroundColor: 'darkblue',
                                 tension: 0.1,
                                 fill: false
                               },
                               {
-                                label: 'Eventos 2025',
-                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === 2025)?.cantidad || 0),
+                                label: `Eventos ${año2}`,
+                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === año2)?.cantidad || 0),
                                 borderColor: 'lightgreen',
                                 backgroundColor: 'lightgreen',
                                 tension: 0.1,
@@ -1102,15 +1176,15 @@ export default function EstadisticasPage() {
                             labels: puestosLabelsFinal,
                             datasets: [
                               {
-                                label: 'Eventos 2024',
-                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === 2024)?.cantidad || 0),
+                                label: `Eventos ${año1}`,
+                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === año1)?.cantidad || 0),
                                 backgroundColor: 'darkblue',
                                 borderColor: 'darkblue',
                                 borderWidth: 1,
                               },
                               {
-                                label: 'Eventos 2025',
-                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === 2025)?.cantidad || 0),
+                                label: `Eventos ${año2}`,
+                                data: puestosLabelsFinal.map(puesto => porPuesto.find(r => r.puesto === puesto && r.anio === año2)?.cantidad || 0),
                                 backgroundColor: 'lightgreen',
                                 borderColor: 'lightgreen',
                                 borderWidth: 1,

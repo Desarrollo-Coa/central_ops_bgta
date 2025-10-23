@@ -5,10 +5,35 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const id_negocio = searchParams.get('id_negocio')
+    const añosParam = searchParams.get('años') // Formato: "2023,2024,2025"
 
     if (!id_negocio) {
       return NextResponse.json({ error: "Se requiere el parámetro id_negocio" }, { status: 400 })
     }
+
+    // Parsear años dinámicos, por defecto año anterior y actual
+    const currentYear = new Date().getFullYear()
+    let años: number[] = [currentYear - 1, currentYear]
+    if (añosParam) {
+      años = añosParam.split(',').map(año => parseInt(año.trim())).filter(año => !isNaN(año))
+      if (años.length === 0) años = [currentYear - 1, currentYear]
+    }
+
+    // Crear placeholder dinámico para los años
+    const añosPlaceholders = años.map(() => '?').join(',')
+
+    // 0. Obtener años disponibles en la base de datos para este negocio
+    const queryAñosDisponibles = `
+      SELECT DISTINCT YEAR(n.fecha_hora_novedad) as año
+      FROM novedades n
+      JOIN puestos p ON n.id_puesto = p.id_puesto
+      JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
+      JOIN negocios ne ON un.id_negocio = ne.id_negocio
+      WHERE ne.id_negocio = ? AND p.activo = 1
+      ORDER BY año DESC
+    `
+    const [añosDisponibles] = await pool.query(queryAñosDisponibles, [id_negocio])
+    const añosEnBD = (añosDisponibles as any[]).map(row => row.año)
 
     // 1. Información completa del negocio con unidades y puestos
     const queryNegocioCompleto = `
@@ -29,6 +54,7 @@ export async function GET(request: Request) {
     const [negocioCompleto] = await pool.query(queryNegocioCompleto, [id_negocio])
 
     // 2. Eventos por puesto y año (LEFT JOIN para incluir puestos sin eventos)
+    const añosUnion = años.map(año => `SELECT ${año} as anio`).join(' UNION ')
     const queryPorPuesto = `
       SELECT 
         p.id_puesto,
@@ -40,15 +66,15 @@ export async function GET(request: Request) {
       JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
       JOIN negocios ne ON un.id_negocio = ne.id_negocio
       LEFT JOIN (
-        SELECT * FROM novedades WHERE YEAR(fecha_hora_novedad) IN (2024, 2025)
+        SELECT * FROM novedades WHERE YEAR(fecha_hora_novedad) IN (${añosPlaceholders})
       ) n ON n.id_puesto = p.id_puesto
-      JOIN (SELECT 2024 as anio UNION SELECT 2025) y
+      JOIN (${añosUnion}) y
       WHERE ne.id_negocio = ? AND p.activo = 1
         AND (YEAR(n.fecha_hora_novedad) = y.anio OR n.id_novedad IS NULL)
       GROUP BY p.id_puesto, p.nombre_puesto, un.nombre_unidad, y.anio
       ORDER BY un.nombre_unidad, p.nombre_puesto, y.anio
-    `
-    const [porPuesto] = await pool.query(queryPorPuesto, [id_negocio])
+`
+    const [porPuesto] = await pool.query(queryPorPuesto, [...años, id_negocio])
 
     // 3. Eventos por mes y año (todos los meses, aunque no haya eventos)
     const queryPorMes = `
@@ -57,7 +83,7 @@ export async function GET(request: Request) {
         m.mes, 
         COUNT(n.id_novedad) AS cantidad
       FROM 
-        (SELECT 2024 as anio UNION SELECT 2025) y
+        (${añosUnion}) y
       CROSS JOIN 
         (SELECT 1 as mes UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12) m
       LEFT JOIN novedades n ON YEAR(n.fecha_hora_novedad) = y.anio AND MONTH(n.fecha_hora_novedad) = m.mes
@@ -80,7 +106,7 @@ export async function GET(request: Request) {
         COUNT(n.id_novedad) AS cantidad
       FROM tipos_evento t
       JOIN tipos_reporte tr ON t.id_tipo_reporte = tr.id_tipo_reporte
-      CROSS JOIN (SELECT 2024 as anio UNION SELECT 2025) y
+      CROSS JOIN (${añosUnion}) y
       LEFT JOIN novedades n ON n.id_tipo_evento = t.id_tipo_evento AND YEAR(n.fecha_hora_novedad) = y.anio
       LEFT JOIN puestos p ON n.id_puesto = p.id_puesto
       LEFT JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
@@ -96,7 +122,7 @@ export async function GET(request: Request) {
       SELECT 
         y.anio, 
         COUNT(n.id_novedad) AS cantidad
-      FROM (SELECT 2024 as anio UNION SELECT 2025) y
+      FROM (${añosUnion}) y
       LEFT JOIN novedades n ON YEAR(n.fecha_hora_novedad) = y.anio
       LEFT JOIN puestos p ON n.id_puesto = p.id_puesto
       LEFT JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
@@ -191,6 +217,8 @@ export async function GET(request: Request) {
       porMes,
       porTipo,
       totales,
+      años: años, // Incluir los años utilizados en la respuesta
+      añosDisponibles: añosEnBD, // Incluir años disponibles en BD
       
       // Estructura de debugging
       estructuraDebug,
