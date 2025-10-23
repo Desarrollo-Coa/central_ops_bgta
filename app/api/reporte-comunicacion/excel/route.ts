@@ -177,6 +177,7 @@ export async function POST(request: Request) {
           Object.entries(reporte.calificaciones).forEach(([rKey, horaObj]) => {
             if (horaObj && typeof horaObj === 'object' && !Array.isArray(horaObj)) {
               Object.keys(horaObj).forEach((hora) => {
+                // Solo usar la primera hora encontrada para cada clave de reporte
                 if (!horasReales[rKey]) {
                   horasReales[rKey] = hora;
                 }
@@ -186,13 +187,15 @@ export async function POST(request: Request) {
         }
       });
 
+      console.log('Horas reales extraídas:', horasReales);
+
       // Generar horas basadas en las horas reales de las calificaciones
       const horasDiurno: string[] = [];
       const horasNocturno: string[] = [];
       
       // Para cada clave de reporte, obtener su hora real
       clavesDiurno.forEach((clave) => {
-        const hora = horasReales[clave] || '';
+        const hora = horasReales[clave];
         if (hora) {
           horasDiurno.push(hora);
         } else {
@@ -204,7 +207,7 @@ export async function POST(request: Request) {
       });
       
       clavesNocturno.forEach((clave) => {
-        const hora = horasReales[clave] || '';
+        const hora = horasReales[clave];
         if (hora) {
           horasNocturno.push(hora);
         } else {
@@ -214,6 +217,9 @@ export async function POST(request: Request) {
           horasNocturno.push(`${(horaDefault % 24).toString().padStart(2, '0')}:00`);
         }
       });
+
+      console.log('Horas diurno generadas:', horasDiurno);
+      console.log('Horas nocturno generadas:', horasNocturno);
 
       const sheet = workbook.addWorksheet(fecha);
       hojasConDatos++;
