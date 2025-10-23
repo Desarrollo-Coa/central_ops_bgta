@@ -348,7 +348,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
                     <table width="100%">
                       <tr>
                         <td align="center">
-                          <p style="margin: 0; font-size: 14px; color: #ffffff;">© ${new Date().getFullYear()} RENOA - CENTRAL OPERACIONES COSTA - Todos los derechos reservados</p>
+                          <p style="margin: 0; font-size: 14px; color: #ffffff;">© ${new Date().getFullYear()} RENOA - Todos los derechos reservados</p>
                           <p style="margin: 8px 0 0 0; font-size: 12px; color: #ffffff;">
                             Reporte generado: ${format(new Date(), 'dd/MM/yyyy')}
                           </p>
