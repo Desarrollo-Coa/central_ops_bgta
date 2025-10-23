@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { PutObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { v4 as uuidv4 } from 'uuid'
-import { s3Client, getFileUrl } from '@/lib/s3-config'
+
+const s3Client = new S3Client({
+  region: 'nyc3',
+  endpoint: `https://${process.env.DO_SPACES_ENDPOINT}`,
+  forcePathStyle: false,
+  credentials: {
+    accessKeyId: process.env.DO_SPACES_KEY || '',
+    secretAccessKey: process.env.DO_SPACES_SECRET || ''
+  }
+})
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,7 +48,7 @@ export async function POST(request: NextRequest) {
     const uniqueId = uuidv4()
     
     const fileName = `novedades/imagenes/${uniqueId}${fileExtension}`
-    const fileUrl = getFileUrl(fileName)
+    const fileUrl = `https://${process.env.DO_SPACES_BUCKET}.${process.env.DO_SPACES_ENDPOINT}/${fileName}`
 
     console.log('Subiendo imagen a DigitalOcean Spaces:', {
       bucket: process.env.DO_SPACES_BUCKET,

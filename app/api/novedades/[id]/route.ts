@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import pool from '@/lib/db';
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { RowDataPacket } from 'mysql2';
-import { s3Client } from '@/lib/s3-config';
+
+const s3Client = new S3Client({
+  region: process.env.DO_SPACES_REGION!,
+  endpoint: process.env.DO_SPACES_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.DO_SPACES_KEY!,
+    secretAccessKey: process.env.DO_SPACES_SECRET!
+  }
+});
 
 type RouteContext = {
   params: Promise<{ id: string }>

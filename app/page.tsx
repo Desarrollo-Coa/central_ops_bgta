@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Modules } from "@/components/modules";
 import { useAuth } from "@/hooks/useAuth";
 import Skeleton from "@/components/ui/skeleton";
-import { Calendar, MessageSquare } from "lucide-react";
+import { Calendar, MessageSquare, AlertTriangle } from "lucide-react";
 
 const dashboardTitle = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_DASHBOARD_TITLE
   ? process.env.NEXT_PUBLIC_DASHBOARD_TITLE
@@ -30,6 +30,13 @@ export default function Home() {
       icon: <MessageSquare className="h-6 w-6 text-muted-foreground" />,
       image: "/img/modulos/comunicacion/Comunicacion.jpeg",
       link: "/comunicacion",
+    },
+    {
+      title: "Novedades",
+      description: "Gestión y seguimiento de novedades del personal",
+      icon: <AlertTriangle className="h-6 w-6 text-muted-foreground" />,
+      image: "/img/modulos/novedades/LOGO-RENOA.jpeg",
+      link: "/novedades",
     }
   ];
 
@@ -52,7 +59,7 @@ export default function Home() {
             <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-100">
               <div className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-w-[1920px] mx-auto">
-                  {[...Array(2)].map((_, i) => (
+                  {[...Array(3)].map((_, i) => (
                     <Card key={i} className="h-[280px]">
                       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <Skeleton className="h-6 w-32" />

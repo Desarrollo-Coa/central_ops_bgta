@@ -5,7 +5,8 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const filtroTemporal = searchParams.get('filtroTemporal')
-    const zona = searchParams.get('zona')
+    const unidadNegocio = searchParams.get('unidadNegocio')
+    const negocio = searchParams.get('negocio')
 
     if (!filtroTemporal) {
       return NextResponse.json(
@@ -14,14 +15,8 @@ export async function GET(request: Request) {
       )
     }
 
-    if (!zona) {
-      return NextResponse.json(
-        { error: 'Zona es requerida' },
-        { status: 400 }
-      )
-    }
-
     let query = ''
+    let params: any[] = []
 
     switch (filtroTemporal) {
       case 'anual':
@@ -30,10 +25,11 @@ export async function GET(request: Request) {
           SELECT 
             YEAR(n.fecha_hora_novedad) as nombre,
             COUNT(*) as cantidad
-          FROM novedades_cementos_argos n
-          JOIN Sedes s ON n.id_sede = s.id_sede
-          JOIN zonas_cementos_argos z ON s.id_zona = z.id_zona
-          WHERE z.nombre_zona = ?
+          FROM novedades n
+          JOIN puestos p ON n.id_puesto = p.id_puesto
+          JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
+          JOIN negocios ne ON un.id_negocio = ne.id_negocio
+          WHERE p.activo = 1
           GROUP BY YEAR(n.fecha_hora_novedad)
           ORDER BY nombre DESC
         `
@@ -44,20 +40,22 @@ export async function GET(request: Request) {
         query = `
           WITH total_novedades AS (
             SELECT COUNT(*) as total 
-            FROM novedades_cementos_argos n
-            JOIN Sedes s ON n.id_sede = s.id_sede
-            JOIN zonas_cementos_argos z ON s.id_zona = z.id_zona
-            WHERE z.nombre_zona = ?
+            FROM novedades n
+            JOIN puestos p ON n.id_puesto = p.id_puesto
+            JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
+            JOIN negocios ne ON un.id_negocio = ne.id_negocio
+            WHERE p.activo = 1
           )
           SELECT 
             te.nombre_tipo_evento as nombre,
             COUNT(*) as cantidad,
             ROUND((COUNT(*) * 100.0 / (SELECT total FROM total_novedades)), 2) as porcentaje
-          FROM novedades_cementos_argos n
-          JOIN Sedes s ON n.id_sede = s.id_sede
-          JOIN zonas_cementos_argos z ON s.id_zona = z.id_zona
+          FROM novedades n
+          JOIN puestos p ON n.id_puesto = p.id_puesto
+          JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
+          JOIN negocios ne ON un.id_negocio = ne.id_negocio
           JOIN tipos_evento te ON n.id_tipo_evento = te.id_tipo_evento
-          WHERE z.nombre_zona = ?
+          WHERE p.activo = 1
           GROUP BY te.nombre_tipo_evento
           ORDER BY cantidad DESC
         `
@@ -69,11 +67,11 @@ export async function GET(request: Request) {
           SELECT 
             p.nombre_puesto as nombre,
             COUNT(*) as cantidad
-          FROM novedades_cementos_argos n
-          JOIN Sedes s ON n.id_sede = s.id_sede
-          JOIN zonas_cementos_argos z ON s.id_zona = z.id_zona
-          JOIN puestos_cementos_argos p ON n.id_puesto = p.id_puesto
-          WHERE z.nombre_zona = ?
+          FROM novedades n
+          JOIN puestos p ON n.id_puesto = p.id_puesto
+          JOIN unidades_negocio un ON p.id_unidad = un.id_unidad
+          JOIN negocios ne ON un.id_negocio = ne.id_negocio
+          WHERE p.activo = 1
           GROUP BY p.nombre_puesto
           ORDER BY cantidad DESC
           LIMIT 10
@@ -84,7 +82,6 @@ export async function GET(request: Request) {
         throw new Error('Filtro temporal no válido')
     }
 
-    const params = filtroTemporal === 'tipo' ? [zona, zona] : [zona]
     const [datos] = await pool.query(query, params)
     
     return NextResponse.json(Array.isArray(datos) ? datos : [])
