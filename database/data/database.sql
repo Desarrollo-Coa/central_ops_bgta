@@ -289,6 +289,20 @@ CREATE TABLE `historial_envios` (
   CONSTRAINT `historial_envios_ibfk_2` FOREIGN KEY (`operador_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Tabla de destinatarios de envío (detalle individual de cada destinatario)
+CREATE TABLE `destinatarios_envio` (
+  `id_destinatario_envio` int NOT NULL AUTO_INCREMENT,
+  `id_historial` int NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `nombre` varchar(255) NOT NULL,
+  `estado` enum('enviado','error') NOT NULL,
+  `error` text,
+  `fecha_envio` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_destinatario_envio`),
+  KEY `id_historial` (`id_historial`),
+  CONSTRAINT `destinatarios_envio_ibfk_1` FOREIGN KEY (`id_historial`) REFERENCES `historial_envios` (`id_envio`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================
 -- DATOS DE EJEMPLO PARA NOVEDADES
 -- ============================================
