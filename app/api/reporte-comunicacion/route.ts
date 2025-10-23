@@ -8,9 +8,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const negocioId = searchParams.get('negocioId');
     const fecha = searchParams.get('fecha');
-    console.log('[GET /api/reporte-comunicacion] negocioId:', negocioId, 'fecha:', fecha);
     if (!negocioId || !fecha) {
-      console.log('[GET /api/reporte-comunicacion] Faltan parámetros negocioId o fecha', { negocioId, fecha });
       return NextResponse.json({ error: 'Faltan parámetros negocioId o fecha' }, { status: 400 });
     }
 
@@ -50,35 +48,24 @@ export async function GET(request: Request) {
         idsCumplido
       ) as any[];
 
-      // DEPURACIÓN: Mostrar los reportes crudos obtenidos de la base de datos
-      console.log('--- DEPURACIÓN: Reportes crudos obtenidos ---');
-      console.log(reportesRows);
+    reportes = reportesRows.map((r: any) => {
+      let calificacionesProcesadas;
+      try {
+        calificacionesProcesadas = migrarCalificaciones(
+          typeof r.calificaciones === "string"
+            ? JSON.parse(r.calificaciones)
+            : (r.calificaciones || {})
+        );
+      } catch (e) {
+        console.error('Error al migrar calificaciones para id_cumplido', r.id_cumplido, e);
+        calificacionesProcesadas = {};
+      }
 
-      reportes = reportesRows.map((r: any) => {
-        let calificacionesProcesadas;
-        try {
-          calificacionesProcesadas = migrarCalificaciones(
-            typeof r.calificaciones === "string"
-              ? JSON.parse(r.calificaciones)
-              : (r.calificaciones || {})
-          );
-        } catch (e) {
-          console.error('Error al migrar calificaciones para id_cumplido', r.id_cumplido, e);
-          calificacionesProcesadas = {};
-        }
-        // DEPURACIÓN: Mostrar el resultado de la migración de calificaciones
-        console.log(`--- DEPURACIÓN: Calificaciones migradas para id_cumplido ${r.id_cumplido} ---`);
-        console.log(calificacionesProcesadas);
-
-        return {
-          id_cumplido: r.id_cumplido,
-          calificaciones: calificacionesProcesadas,
-        };
-      });
-
-      // DEPURACIÓN: Mostrar el array final de reportes procesados
-      console.log('--- DEPURACIÓN: Reportes procesados finales ---');
-      console.log(reportes);
+      return {
+        id_cumplido: r.id_cumplido,
+        calificaciones: calificacionesProcesadas,
+      };
+    });
     }
 
     // 3. Combinar todo
@@ -100,31 +87,6 @@ export async function GET(request: Request) {
       };
     });
 
-    // --- MINI INFORME DE DEPURACIÓN ---
-    console.log('\n========= MINI INFORME DE CALIFICACIONES =========');
-    const turnosNombres = { 1: 'DIURNO', 2: 'NOCTURNO', 3: 'TURNO B' } as Record<number, string>;
-    resultado.forEach(r => {
-      console.log(`\nNOMBRE DEL PUESTO: ${r.nombre_puesto || r.id_puesto}`);
-      const turno = turnosNombres[r.id_tipo_turno] || `TURNO ${r.id_tipo_turno}`;
-      console.log(`TURNO: ${turno}`);
-      if (r.colaborador) {
-        console.log(`COLABORADOR: ${r.colaborador}`);
-      }
-      if (r.calificaciones && Object.keys(r.calificaciones).length > 0) {
-        console.log('CALIFICACIONES:');
-        Object.entries(r.calificaciones).forEach(([rKey, horasObj]) => {
-          if (horasObj && typeof horasObj === 'object' && !Array.isArray(horasObj)) {
-            Object.entries(horasObj).forEach(([hora, val]) => {
-              const valor = typeof val === 'object' && val !== null && 'valor' in val ? val.valor : val;
-              console.log(`    ${rKey}: ${hora} >: ${valor}`);
-            });
-          }
-        });
-      } else {
-        console.log('SIN CALIFICACIONES');
-      }
-    });
-    console.log('==============================================\n');
 
     return NextResponse.json(resultado);
   } catch (error) {

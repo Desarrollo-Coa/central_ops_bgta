@@ -11,7 +11,11 @@ export async function GET() {
     return NextResponse.json(rows, { status: 200 });
   } catch (error) {
     console.error("Error al obtener negocios:", error);
-    return NextResponse.json({ error: "Error al obtener negocios" }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    return NextResponse.json({ 
+      error: "Error al obtener negocios", 
+      details: errorMessage 
+    }, { status: 500 });
   }
 }
 

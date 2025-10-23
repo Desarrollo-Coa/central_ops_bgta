@@ -16,38 +16,11 @@ import { Switch } from '@/components/ui/switch';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 
+import { Cumplido, Puesto, Nota } from '@/types/cumplido';
+
 interface CumplidoNegocioTableProps {
   negocioId: number;
   negocioNombre: string;
-}
-
-interface Cumplido {
-  id_cumplido: number;
-  fecha: string;
-  id_puesto: number;
-  id_tipo_turno: number;
-  colaborador: string;
-  nombre_puesto: string;
-  nombre_unidad: string;
-  notas?: Nota[];
-  colaborador_nombre?: string;
-  colaborador_apellido?: string;
-  nombre_colaborador?: string;
-}
-
-interface Puesto {
-  id_puesto: number;
-  nombre_puesto: string;
-  nombre_unidad: string;
-  id_unidad: number;
-  activo: boolean;
-  fecha_inicial?: string;
-}
-
-interface Nota {
-  id_nota: number;
-  id_cumplido: number;
-  nota: string;
 }
 
 interface UnidadNegocio {

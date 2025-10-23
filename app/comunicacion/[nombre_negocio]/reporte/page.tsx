@@ -1,59 +1,21 @@
 'use client';
 export const dynamic = "force-dynamic";
-import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-// import { CumplidoNegocioTable } from '@/components/reporte-diario';
 import { CumplidoNegocioTable } from '@/components/reporte-diario';
-import SelectorNegocioGenerales, { Negocio } from '@/components/negocios/SelectorNegocioGenerales';
+import SelectorNegocioGenerales from '@/components/negocios/SelectorNegocioGenerales';
 import { useRouter } from 'next/navigation';
+import { useNegocios, useNegocioPorNombre } from '@/hooks/useNegocios';
 
 export default function ReporteDiarioPage() {
   const params = useParams();
   const nombreNegocioParam = params?.nombre_negocio;
-  const [negocio, setNegocio] = useState<{ id_negocio: number; nombre_negocio: string } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [negocios, setNegocios] = useState<Negocio[]>([]);
   const router = useRouter();
-
-  useEffect(() => {
-    const fetchNegocios = async () => {
-      try {
-        const res = await fetch('/api/negocios')
-        const data = await res.json()
-        setNegocios(data)
-      } catch (error) {
-        console.error('Error al cargar negocios:', error)
-      }
-    }
-    fetchNegocios()
-  }, []);
-
-  useEffect(() => {
-    const fetchNegocio = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch('/api/negocios');
-        if (!res.ok) throw new Error('No se pudieron obtener los negocios');
-        const data = await res.json();
-        const nombreParam = decodeURIComponent(Array.isArray(nombreNegocioParam) ? nombreNegocioParam[0] : nombreNegocioParam || '').replace(/_/g, ' ').trim().toLowerCase();
-        const encontrado = data.find((n: any) => n.nombre_negocio.trim().toLowerCase() === nombreParam);
-        if (!encontrado) {
-          setError('Negocio no encontrado');
-          setNegocio(null);
-        } else {
-          setNegocio({ id_negocio: encontrado.id_negocio, nombre_negocio: encontrado.nombre_negocio });
-        }
-      } catch (err: any) {
-        setError(err.message || 'Error desconocido');
-        setNegocio(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-    if (nombreNegocioParam) fetchNegocio();
-  }, [nombreNegocioParam]);
+  
+  const { negocios, loading: negociosLoading, error: negociosError } = useNegocios();
+  const { negocio, loading: negocioLoading, error: negocioError } = useNegocioPorNombre(nombreNegocioParam);
+  
+  const loading = negociosLoading || negocioLoading;
+  const error = negocioError || negociosError;
 
   return (
     <div className="flex h-screen bg-gray-100">

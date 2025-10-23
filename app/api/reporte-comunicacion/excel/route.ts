@@ -51,10 +51,10 @@ async function getConfiguracion(negocioId: string, fecha: string) {
     [negocioId, fecha]
   );
     const config = Array.isArray(rows) && rows.length > 0 ? rows[0] : { cantidad_diurno: 1, cantidad_nocturno: 1 };
-  return config as { cantidad_diurno: number; cantidad_nocturno: number };
+  return { ...config, cantidad_turno_b: 0 } as { cantidad_diurno: number; cantidad_nocturno: number; cantidad_turno_b: number };
   } catch (error) {
     console.error('Error al obtener configuración, usando valores por defecto:', error);
-    return { cantidad_diurno: 1, cantidad_nocturno: 1 };
+    return { cantidad_diurno: 1, cantidad_nocturno: 1, cantidad_turno_b: 0 };
   }
 }
 
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
 
     for (const fecha of [...fechas].reverse()) {
       try {
-      const { cantidad_diurno, cantidad_nocturno } = await getConfiguracion(negocioId, fecha);
+      const { cantidad_diurno, cantidad_nocturno, cantidad_turno_b } = await getConfiguracion(negocioId, fecha);
 
       const [cumplidosRows] = await pool.query(
         `SELECT c.*, p.*, u.*, c.nombre_colaborador
@@ -166,65 +166,86 @@ export async function POST(request: Request) {
         }
       });
 
-      // Generar claves basadas en la configuración
-      const clavesDiurno = Array.from({ length: cantidad_diurno }, (_, i) => `R${i + 1}:N`);
-      const clavesNocturno = Array.from({ length: cantidad_nocturno }, (_, i) => `R${i + 1}:N`);
+      // Generar claves basadas en la configuración (igual que el frontend)
+      const horas: { key: string; label: string; tipo: "diurno" | "b" | "nocturno" }[] = [
+        ...Array.from({ length: cantidad_diurno || 0 }, (_, i) => ({
+          key: `R${i + 1}`,
+          label: `R${i + 1} (Diurno)`,
+          tipo: "diurno" as const,
+        })),
+        ...Array.from({ length: cantidad_turno_b || 0 }, (_, i) => ({
+          key: `R${cantidad_diurno + i + 1}`,
+          label: `R${cantidad_diurno + i + 1} (Turno B)`,
+          tipo: "b" as const,
+        })),
+        ...Array.from({ length: cantidad_nocturno || 0 }, (_, i) => ({
+          key: `R${cantidad_diurno + (cantidad_turno_b || 0) + i + 1}`,
+          label: `R${cantidad_diurno + (cantidad_turno_b || 0) + i + 1} (Nocturno)`,
+          tipo: "nocturno" as const,
+        })),
+      ];
       
-      // Extraer horas reales de las calificaciones existentes (igual que el frontend)
+      // Extraer horas reales de las calificaciones existentes
       const horasReales: { [key: string]: string } = {};
-      reportes.forEach((reporte: any) => {
-        if (reporte.calificaciones && typeof reporte.calificaciones === 'object') {
-          Object.entries(reporte.calificaciones).forEach(([rKey, horaObj]) => {
-            if (horaObj && typeof horaObj === 'object' && !Array.isArray(horaObj)) {
-              Object.keys(horaObj).forEach((hora) => {
-                // Solo usar la primera hora encontrada para cada clave de reporte
-                if (!horasReales[rKey]) {
-                  horasReales[rKey] = hora;
+      
+      // Buscar horas reales en los datos estructurados por puesto y turno
+      Object.values(cumplidosEstructurados).forEach((turnos: any) => {
+        Object.values(turnos).forEach((turno: any) => {
+          if (turno.calificaciones && typeof turno.calificaciones === 'object') {
+            Object.entries(turno.calificaciones).forEach(([rKey, horaObj]) => {
+              if (horaObj && typeof horaObj === 'object' && !Array.isArray(horaObj)) {
+                // Buscar la primera hora que tenga datos (valor > 0 o nota)
+                const horasConDatos = Object.entries(horaObj).filter(([hora, val]) => {
+                  if (val && typeof val === 'object' && 'valor' in val) {
+                    return val.valor > 0 || (val.nota && val.nota.trim() !== '');
+                  }
+                  return val > 0;
+                });
+                
+                if (horasConDatos.length > 0 && !horasReales[rKey]) {
+                  horasReales[rKey] = horasConDatos[0][0]; // Usar la primera hora con datos
                 }
-              });
-            }
-          });
-        }
+              }
+            });
+          }
+        });
       });
 
+      console.log('=== DEPURACIÓN EXCEL ===');
+      console.log('Horas generadas:', horas.map(h => `${h.key} (${h.tipo})`));
       console.log('Horas reales extraídas:', horasReales);
+      console.log('Reportes encontrados:', reportes.length);
 
       // Generar horas basadas en las horas reales de las calificaciones
-      const horasDiurno: string[] = [];
-      const horasNocturno: string[] = [];
+      const horasConValores: { key: string; hora: string; tipo: "diurno" | "b" | "nocturno" }[] = [];
       
-      // Para cada clave de reporte, obtener su hora real
-      clavesDiurno.forEach((clave) => {
-        const hora = horasReales[clave];
+      horas.forEach((h) => {
+        const hora = horasReales[h.key];
         if (hora) {
-          horasDiurno.push(hora);
+          horasConValores.push({ ...h, hora });
         } else {
-          // Si no hay hora real, usar hora por defecto basada en la posición
-          const index = clavesDiurno.indexOf(clave);
-          const horaDefault = 6 + index;
-          horasDiurno.push(`${horaDefault.toString().padStart(2, '0')}:00`);
-        }
-      });
-      
-      clavesNocturno.forEach((clave) => {
-        const hora = horasReales[clave];
-        if (hora) {
-          horasNocturno.push(hora);
-        } else {
-          // Si no hay hora real, usar hora por defecto basada en la posición
-          const index = clavesNocturno.indexOf(clave);
-          const horaDefault = 22 + index;
-          horasNocturno.push(`${(horaDefault % 24).toString().padStart(2, '0')}:00`);
+          // Si no hay hora real, usar hora por defecto basada en el tipo
+          let horaDefault = '';
+          if (h.tipo === 'diurno') {
+            const index = horas.filter(hr => hr.tipo === 'diurno').indexOf(h);
+            horaDefault = `${(6 + index).toString().padStart(2, '0')}:00`;
+          } else if (h.tipo === 'b') {
+            const index = horas.filter(hr => hr.tipo === 'b').indexOf(h);
+            horaDefault = `${(14 + index).toString().padStart(2, '0')}:00`;
+          } else if (h.tipo === 'nocturno') {
+            const index = horas.filter(hr => hr.tipo === 'nocturno').indexOf(h);
+            horaDefault = `${(22 + index).toString().padStart(2, '0')}:00`;
+          }
+          horasConValores.push({ ...h, hora: horaDefault });
         }
       });
 
-      console.log('Horas diurno generadas:', horasDiurno);
-      console.log('Horas nocturno generadas:', horasNocturno);
+      console.log('Horas finales con valores:', horasConValores);
 
       const sheet = workbook.addWorksheet(fecha);
       hojasConDatos++;
 
-      const totalCols = 6 + clavesDiurno.length + clavesNocturno.length;
+      const totalCols = 6 + horasConValores.length;
       
       // Título principal
       sheet.mergeCells(1, 1, 1, totalCols);
@@ -292,93 +313,66 @@ export async function POST(request: Request) {
         };
       }
 
-      // Encabezados de turnos y horas
-      let col = encabezadosPrincipales.length + 1;
-      const diurnoStartCol = col;
-      
-      // Horas del turno diurno
-      for (let i = 0; i < clavesDiurno.length; i++) {
-        const hora = horasDiurno[i] || '';
-        const hourCell = sheet.getCell(4, col);
-        hourCell.value = hora;
-        hourCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        hourCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
-        hourCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: '002060' }
+        // Encabezados de horas agrupados por turno
+        let col = encabezadosPrincipales.length + 1;
+        
+        // Agrupar horas por tipo de turno
+        const horasPorTurno = {
+          diurno: horasConValores.filter(h => h.tipo === 'diurno'),
+          b: horasConValores.filter(h => h.tipo === 'b'),
+          nocturno: horasConValores.filter(h => h.tipo === 'nocturno')
         };
-        hourCell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        };
-        col++;
-      }
-      const diurnoEndCol = col - 1;
-      
-      const nocturnoStartCol = col;
-      // Horas del turno nocturno
-      for (let i = 0; i < clavesNocturno.length; i++) {
-        const hora = horasNocturno[i] || '';
-        const hourCell = sheet.getCell(4, col);
-        hourCell.value = hora;
-        hourCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        hourCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
-        hourCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: '002060' }
-        };
-        hourCell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        };
-        col++;
-      }
-      const nocturnoEndCol = col - 1;
-
-      // Títulos de turnos
-      if (clavesDiurno.length > 0 && diurnoEndCol >= diurnoStartCol) {
-        sheet.mergeCells(3, diurnoStartCol, 3, diurnoEndCol);
-        const turnoDiurnoCell = sheet.getCell(3, diurnoStartCol);
-        turnoDiurnoCell.value = 'TURNO DIURNO';
-        turnoDiurnoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        turnoDiurnoCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 11 };
-        turnoDiurnoCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: '002060' }
-        };
-        turnoDiurnoCell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        };
-      }
-      
-      if (clavesNocturno.length > 0 && nocturnoEndCol >= nocturnoStartCol) {
-        sheet.mergeCells(3, nocturnoStartCol, 3, nocturnoEndCol);
-        const turnoNocturnoCell = sheet.getCell(3, nocturnoStartCol);
-        turnoNocturnoCell.value = 'TURNO NOCTURNO';
-        turnoNocturnoCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        turnoNocturnoCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 11 };
-        turnoNocturnoCell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: '002060' }
-        };
-        turnoNocturnoCell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        };
-      }
+        
+        // Generar encabezados agrupados
+        Object.entries(horasPorTurno).forEach(([tipoTurno, horas]) => {
+          if (horas.length === 0) return;
+          
+          const tipoLabel = tipoTurno === 'diurno' ? 'DIURNO' : tipoTurno === 'b' ? 'TURNO B' : 'NOCTURNO';
+          
+          // Encabezado del grupo (si hay más de una hora)
+          if (horas.length > 1) {
+            const groupCell = sheet.getCell(3, col);
+            groupCell.value = tipoLabel;
+            groupCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            groupCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
+            groupCell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: '002060' }
+            };
+            groupCell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+            
+            // Combinar celdas del grupo
+            if (horas.length > 1) {
+              sheet.mergeCells(3, col, 3, col + horas.length - 1);
+            }
+          }
+          
+          // Encabezados individuales de horas
+          horas.forEach((h) => {
+            const hourCell = sheet.getCell(4, col);
+            hourCell.value = h.hora;
+            hourCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            hourCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
+            hourCell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: '002060' }
+            };
+            hourCell.border = {
+              top: { style: 'thin' },
+              left: { style: 'thin' },
+              bottom: { style: 'thin' },
+              right: { style: 'thin' }
+            };
+            col++;
+          });
+        });
 
       let row = 5;
       for (const unidad of Object.keys(unidades)) {
@@ -498,32 +492,24 @@ export async function POST(request: Request) {
           }
           col++;
 
-          // Procesar columnas diurnas (incluye Turno B)
-          for (let i = 0; i < clavesDiurno.length; i++) {
-            const k = clavesDiurno[i];
-            const hora = horasDiurno[i];
+          // Procesar columnas de calificaciones (renderizar datos sin asociar turnos)
+          horasConValores.forEach((h) => {
             let valor = '';
             let nota = '';
             
-            // Buscar en diurno primero
-            if (diurnoData.calificaciones && diurnoData.calificaciones[k] && diurnoData.calificaciones[k][hora]) {
-              const val = diurnoData.calificaciones[k][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    valor = val.valor;
-                nota = val.nota || '';
-                  } else {
-                    valor = val;
-              }
-            }
+            // Buscar en todos los turnos (diurno, b, nocturno) sin asociar por hora
+            const todosTurnos = [diurnoData, turnoBData, nocturnoData];
             
-            // Si no hay en diurno, buscar en Turno B
-            if (valor === '' && turnoBData.calificaciones && turnoBData.calificaciones[k] && turnoBData.calificaciones[k][hora]) {
-              const val = turnoBData.calificaciones[k][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    valor = val.valor;
-                nota = val.nota || '';
-                  } else {
-                    valor = val;
+            for (const turnoData of todosTurnos) {
+              if (turnoData && turnoData.calificaciones && turnoData.calificaciones[h.key] && turnoData.calificaciones[h.key][h.hora]) {
+                const val = turnoData.calificaciones[h.key][h.hora];
+                if (val && typeof val === 'object' && 'valor' in val) {
+                  valor = val.valor;
+                  nota = val.nota || '';
+                } else {
+                  valor = val;
+                }
+                break; // Usar el primer valor encontrado
               }
             }
             
@@ -541,71 +527,9 @@ export async function POST(request: Request) {
             if (nota && nota.length > 0) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCCC' } };
               cell.note = nota;
-            } else if (valor !== '' && valor !== null && valor !== undefined) {
-              // Color según el valor de la calificación
-              const numValor = parseFloat(valor);
-              if (!isNaN(numValor)) {
-                if (numValor >= 4) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } }; // Verde claro
-                } else if (numValor >= 3) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } }; // Amarillo claro
-                } else if (numValor > 0) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } }; // Rojo claro
-                }
-                // Si numValor es 0, no aplicar color (celda blanca)
-              }
             }
             col++;
-          }
-
-          // Procesar columnas nocturnas
-          for (let i = 0; i < clavesNocturno.length; i++) {
-            const k = clavesNocturno[i];
-            const hora = horasNocturno[i];
-            let valor = '';
-            let nota = '';
-            
-            // Buscar en nocturno
-            if (nocturnoData.calificaciones && nocturnoData.calificaciones[k] && nocturnoData.calificaciones[k][hora]) {
-              const val = nocturnoData.calificaciones[k][hora];
-                  if (val && typeof val === 'object' && 'valor' in val) {
-                    valor = val.valor;
-                nota = val.nota || '';
-                  } else {
-                    valor = val;
-              }
-            }
-            
-            const cell = sheet.getCell(row, col);
-            cell.value = valor;
-            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-            cell.font = { size: 10 };
-            cell.border = {
-              top: { style: 'thin' },
-              left: { style: 'thin' },
-              bottom: { style: 'thin' },
-              right: { style: 'thin' }
-            };
-            
-            if (nota && nota.length > 0) {
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCCC' } };
-              cell.note = nota;
-            } else if (valor !== '' && valor !== null && valor !== undefined) {
-              // Color según el valor de la calificación
-              const numValor = parseFloat(valor);
-              if (!isNaN(numValor)) {
-                if (numValor >= 4) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } }; // Verde claro
-                } else if (numValor >= 3) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } }; // Amarillo claro
-                } else if (numValor > 0) {
-                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } }; // Rojo claro
-                }
-                // Si numValor es 0, no aplicar color (celda blanca)
-              }
-            }
-            col++;
-          }
+          });
 
           // Aplicar estilo de fila alternada solo a celdas que no tienen color especial
           const fillColor = row % 2 === 0 ? 'FFFFFF' : 'F8F9FA';
@@ -645,8 +569,7 @@ export async function POST(request: Request) {
         { width: 30 }, // Colaborador turno B
         { width: 30 }, // Colaborador nocturno
         { width: 20 }, // Nivel de comunicación
-        ...clavesDiurno.map(() => ({ width: 15 })), // Columnas diurnas
-        ...clavesNocturno.map(() => ({ width: 15 })), // Columnas nocturnas
+        ...horasConValores.map(() => ({ width: 15 })), // Columnas de calificaciones
       ];
       
       // Configurar altura de filas

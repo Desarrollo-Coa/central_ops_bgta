@@ -17,35 +17,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import ModalConfirmacion from "@/components/modal-confirmacion"
 import ConfiguracionesReportesModal from "@/components/configuraciones-reportes-modal"
 
-interface Cumplido {
-  id_cumplido: number
-  fecha: string
-  id_puesto: number
-  id_tipo_turno: number
-  colaborador_diurno: string
-  colaborador_nocturno: string
-  calificaciones: { [key: string]: number }
-  notas?: { [key: string]: string }
-  colaborador?: string
-}
-
-interface Configuracion {
-  id: number
-  fecha_inicial: string
-  cantidad_diurno: number
-  cantidad_nocturno: number
-  id_negocio: number
-}
+import { Cumplido, Configuracion, DateState } from '@/types/cumplido';
 
 interface CumplidoNegocioTableProps {
   negocioId: number
   negocioNombre: string
-}
-
-interface DateState {
-  anio: string
-  mes: string
-  dia: string
 }
 
 interface ModalState {
@@ -208,11 +184,13 @@ export function CumplidoNegocioTable({ negocioId, negocioNombre }: CumplidoNegoc
         else if (reporte.id_tipo_turno === 3) tipoTurno = "b"
 
         if (!grouped[reporte.id_puesto]) grouped[reporte.id_puesto] = {}
+        const puesto = puestos.find(p => p.id_puesto === reporte.id_puesto);
         grouped[reporte.id_puesto][tipoTurno] = {
           id_cumplido: reporte.id_cumplido,
           fecha: reporte.fecha,
           id_puesto: reporte.id_puesto,
           id_tipo_turno: reporte.id_tipo_turno,
+          nombre_puesto: puesto?.nombre_puesto || "",
           colaborador: reporte.colaborador ?? "",
           colaborador_diurno: reporte.colaborador_diurno ?? "",
           colaborador_nocturno: reporte.colaborador_nocturno ?? "",
@@ -493,7 +471,8 @@ export function CumplidoNegocioTable({ negocioId, negocioNombre }: CumplidoNegoc
     (e: React.MouseEvent, idPuesto: number, tipo: "diurno" | "nocturno", hora: string) => {
       e.preventDefault()
       const cumplido = cumplidos[idPuesto]
-      const nota = (tipo === "diurno" ? cumplido?.diurno?.notas?.[hora] : cumplido?.nocturno?.notas?.[hora]) || ""
+      const notasObj = tipo === "diurno" ? cumplido?.diurno?.notas : cumplido?.nocturno?.notas;
+      const nota = (notasObj && typeof notasObj === 'object' && !Array.isArray(notasObj) && notasObj[hora]) || ""
       setModal({
         type: "nota",
         open: true,
@@ -670,7 +649,22 @@ export function CumplidoNegocioTable({ negocioId, negocioNombre }: CumplidoNegoc
   const puestosFiltrados = puestos.filter((puesto) => {
     const fechaInicial = puesto.fecha_inicial ? new Date(puesto.fecha_inicial) : null
     const fechaValida = !fechaInicial || fechaSeleccionada >= fechaInicial
-    return puesto.activo && fechaValida
+    
+    // Si el puesto está activo y la fecha es válida, incluirlo
+    if (puesto.activo && fechaValida) {
+      return true
+    }
+    
+    // Si el puesto está desactivado pero tiene datos para esta fecha, incluirlo también
+    if (!puesto.activo && fechaValida) {
+      const tieneDatos = Object.keys(cumplidos).some(idPuesto => 
+        Number(idPuesto) === puesto.id_puesto && 
+        (cumplidos[Number(idPuesto)]?.diurno || cumplidos[Number(idPuesto)]?.b || cumplidos[Number(idPuesto)]?.nocturno)
+      )
+      return tieneDatos
+    }
+    
+    return false
   })
 
   const puestosOrdenados = [...puestosFiltrados].sort((a, b) => {
