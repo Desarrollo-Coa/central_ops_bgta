@@ -722,35 +722,3 @@ INSERT INTO `reporte_comunicacion` (`id`, `id_cumplido`, `calificaciones`) VALUE
 (30, 241, '{"comunicacion": 4, "atencion": 4, "servicio": 4}'),
 (31, 251, '{"comunicacion": 5, "atencion": 5, "servicio": 5}');
 
--- Insertar destinatarios de ejemplo
-INSERT INTO `destinatarios` (`id_destinatario`, `email`, `nombre`) VALUES
-(1, 'gerencia@renea.com', 'Gerencia General'),
-(2, 'operaciones@renea.com', 'Jefe de Operaciones'),
-(3, 'seguridad@renea.com', 'Jefe de Seguridad'),
-(4, 'rh@renea.com', 'Recursos Humanos'),
-(5, 'mantenimiento@renea.com', 'Mantenimiento'),
-(6, 'logistica@renea.com', 'Logística'),
-(7, 'supervisor1@renea.com', 'Supervisor Zona Norte'),
-(8, 'supervisor2@renea.com', 'Supervisor Zona Sur'),
-(9, 'coordinador@renea.com', 'Coordinador General'),
-(10, 'director@renea.com', 'Director de Operaciones');
-
-
-
--- Insertar asignaciones de destinatarios
-INSERT INTO `asignaciones_destinatarios` (`id_asignacion`, `id_tipo_evento`, `id_puesto`, `id_destinatario`) VALUES
-(1, 1, 1, 3), -- Agresión en puesto 1 -> Jefe de Seguridad
-(2, 1, 2, 3), -- Agresión en puesto 2 -> Jefe de Seguridad
-(3, 1, 3, 3), -- Agresión en puesto 3 -> Jefe de Seguridad
-(4, 4, 1, 5), -- Fallas eléctricas en puesto 1 -> Mantenimiento
-(5, 4, 2, 5), -- Fallas eléctricas en puesto 2 -> Mantenimiento
-(6, 10, 1, 3), -- Hurto en puesto 1 -> Jefe de Seguridad
-(7, 10, 2, 3), -- Hurto en puesto 2 -> Jefe de Seguridad
-(8, 12, 1, 4), -- Accidentes en puesto 1 -> Recursos Humanos
-(9, 12, 2, 4), -- Accidentes en puesto 2 -> Recursos Humanos
-(10, 2, 1, 5), -- Infraestructura en puesto 1 -> Mantenimiento
-(11, 2, 2, 5), -- Infraestructura en puesto 2 -> Mantenimiento
-(12, 5, 1, 6), -- Logística en puesto 1 -> Logística
-(13, 5, 2, 6), -- Logística en puesto 2 -> Logística
-(14, 11, 1, 2), -- Incumplimiento en puesto 1 -> Jefe de Operaciones
-(15, 11, 2, 2); -- Incumplimiento en puesto 2 -> Jefe de Operaciones
