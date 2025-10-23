@@ -31,13 +31,14 @@ export default function Home() {
       image: "/img/modulos/comunicacion/Comunicacion.jpeg",
       link: "/comunicacion",
     },
-    {
-      title: "Novedades",
-      description: "Gestión y seguimiento de novedades del personal",
-      icon: <AlertTriangle className="h-6 w-6 text-muted-foreground" />,
-      image: "/img/modulos/novedades/LOGO-RENOA.jpeg",
-      link: "/novedades",
-    }
+    // TEMPORALMENTE DESHABILITADO - Módulo de Novedades en desarrollo/testing
+    // {
+    //   title: "Novedades",
+    //   description: "Gestión y seguimiento de novedades del personal",
+    //   icon: <AlertTriangle className="h-6 w-6 text-muted-foreground" />,
+    //   image: "/img/modulos/novedades/LOGO-RENOA.jpeg",
+    //   link: "/novedades",
+    // }
   ];
 
   useEffect(() => {
