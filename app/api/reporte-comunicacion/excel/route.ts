@@ -314,7 +314,7 @@ export async function POST(request: Request) {
       }
 
         // Encabezados de horas agrupados por turno
-        let col = encabezadosPrincipales.length + 1;
+      let col = encabezadosPrincipales.length + 1;
         
         // Agrupar horas por tipo de turno
         const horasPorTurno = {
@@ -336,10 +336,10 @@ export async function POST(request: Request) {
             groupCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
             groupCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
             groupCell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: '002060' }
-            };
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: '002060' }
+        };
             groupCell.border = {
               top: { style: 'thin' },
               left: { style: 'thin' },
@@ -360,10 +360,10 @@ export async function POST(request: Request) {
             hourCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
             hourCell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
             hourCell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: '002060' }
-            };
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: '002060' }
+        };
             hourCell.border = {
               top: { style: 'thin' },
               left: { style: 'thin' },
@@ -486,7 +486,7 @@ export async function POST(request: Request) {
               nivelComCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'C6EFCE' } }; // Verde claro
             } else if (porcentaje >= 60) {
               nivelComCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEB9C' } }; // Amarillo claro
-            } else {
+                  } else {
               nivelComCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC7CE' } }; // Rojo claro
             }
           }
@@ -503,11 +503,11 @@ export async function POST(request: Request) {
             for (const turnoData of todosTurnos) {
               if (turnoData && turnoData.calificaciones && turnoData.calificaciones[h.key] && turnoData.calificaciones[h.key][h.hora]) {
                 const val = turnoData.calificaciones[h.key][h.hora];
-                if (val && typeof val === 'object' && 'valor' in val) {
-                  valor = val.valor;
+                  if (val && typeof val === 'object' && 'valor' in val) {
+                    valor = val.valor;
                   nota = val.nota || '';
-                } else {
-                  valor = val;
+                  } else {
+                    valor = val;
                 }
                 break; // Usar el primer valor encontrado
               }

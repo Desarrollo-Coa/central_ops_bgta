@@ -2,7 +2,26 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
-    remotePatterns: [],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'sfo3.digitaloceanspaces.com',
+        port: '',
+        pathname: '/cloud-centralbq-ops-storage/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'sfo3.digitaloceanspaces.com',
+        port: '',
+        pathname: '/cloud-centralctg-ops-storage/**',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.digitaloceanspaces.com',
+        port: '',
+        pathname: '/**',
+      },
+    ],
   },
 };
 
