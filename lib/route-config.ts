@@ -11,25 +11,12 @@ export interface RouteConfig {
 // Rutas públicas que no requieren autenticación
 export const publicRoutes = [
   '/login',
-  '/accesos/login',
-  '/accesos/login/[negocio]',
   '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/me',
   '/api/auth/verify-admin',
   '/api/middleware-routes',
   '/api/test-middleware',
-  '/api/accesos/negocios/by-hash',
-  '/api/accesos/auth/login',
-  '/api/accesos/auth/me',
-  '/api/accesos/auth/logout',
-  '/api/accesos/stats',
-  '/api/accesos/puestos',
-  '/api/accesos/turnos',
-  '/api/accesos/asignaciones',
-  '/api/accesos/profile/photo',
-  '/api/accesos/links',
-  '/api/accesos/negocios',
   '/favicon.ico',
   '/_next',
   '/api/webhooks',
@@ -38,7 +25,6 @@ export const publicRoutes = [
 // Rutas que requieren autenticación pero son accesibles para todos los usuarios autenticados
 export const authenticatedRoutes = [
   '/',
-  '/novedades/estadisticas-generales',
   '/api/users/password',
   '/api/logout',
   '/api/stats/active-users',
@@ -47,42 +33,6 @@ export const authenticatedRoutes = [
 
 // Configuración de módulos principales
 export const moduleRoutes: RouteConfig[] = [
-  // Módulo de Accesos (requiere autenticación)
-  {
-    path: '/accesos',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // Módulo de Ausencias
-  {
-    path: '/ausencias',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // Módulo de Novedades
-  {
-    path: '/novedades',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // Módulo de Programación
-  {
-    path: '/programacion',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
   // Módulo de Comunicación
   {
     path: '/comunicacion',
@@ -110,54 +60,10 @@ export const moduleRoutes: RouteConfig[] = [
     acceptsSubroutes: true,
   },
   
-  // Módulo de Marcaciones
-  {
-    path: '/marcaciones-mitra',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: false,
-  },
 ];
 
 // Configuración de rutas de API
 export const apiRoutes: RouteConfig[] = [
-  // API de Accesos
-  {
-    path: '/api/accesos',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // API de Ausencias
-  {
-    path: '/api/ausencias',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // API de Novedades
-  {
-    path: '/api/novedades',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // API de Programación
-  {
-    path: '/api/programacion',
-    requiresAuth: true,
-    requiresAdmin: false,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
   // API de Comunicación
   {
     path: '/api/comunicacion',
@@ -172,15 +78,6 @@ export const apiRoutes: RouteConfig[] = [
     path: '/api/settings',
     requiresAuth: true,
     requiresAdmin: true,
-    allowedRoles: ['administrador'],
-    acceptsSubroutes: true,
-  },
-  
-  // API de Marcaciones
-  {
-    path: '/api/marcaciones',
-    requiresAuth: true,
-    requiresAdmin: false,
     allowedRoles: ['administrador'],
     acceptsSubroutes: true,
   },
